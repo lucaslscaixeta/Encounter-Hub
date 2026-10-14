@@ -1,0 +1,33 @@
+
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  background: #17191f;
+  color: #e8e9ef;
+  font-family: Arial, sans-serif;
+  text-align: center;
+}
+
+h1 {
+  color: #eabf53;
+}
+
+p {
+  color: #b0b3bd;
+}
+
+button {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 6px;
+  background: #eabf53;
+  color: #17191f;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #f4d27c;
+}
