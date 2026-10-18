@@ -93,6 +93,10 @@ function App() {
           alt="Símbolo dourado do Encounter Hub"
         />
       </div>
+
+         <footer className="site-footer">
+           © 2026 Encounter Hub. Todos os direitos reservados.
+      </footer>
     </main>
   );
 }
