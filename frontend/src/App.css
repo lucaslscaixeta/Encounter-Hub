@@ -368,3 +368,268 @@ button {
   }
 
 }
+
+
+
+/* ===== TELA DE CAMPANHAS ===== */
+
+.campaigns-page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #1d2e60;
+  color: #f9f9ff;
+}
+
+.topbar {
+  min-height: 83px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 10px 20px;
+  background: #061440;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.15;
+  text-align: center;
+}
+
+.brand img {
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+}
+
+.topbar-nav {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: clamp(12px, 2vw, 32px);
+}
+
+.topbar-nav button {
+  border: 0;
+  font-size: 15px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.topbar-logout,
+.topbar-link {
+  padding: 12px 20px;
+  background: transparent;
+  color: #fff;
+}
+
+.topbar-link {
+  min-width: 120px;
+  border-radius: 28px;
+  text-align: center;
+}
+
+.topbar-link.active,
+.topbar-link:hover {
+  background: #1d2e60;
+}
+
+.topbar-logout:hover {
+  color: #ffb82e;
+}
+
+.profile-button {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  overflow: hidden;
+  border: 3px solid #ffb82e;
+  border-radius: 50%;
+  background: #ffb82e;
+}
+
+.profile-head {
+  position: absolute;
+  top: 9px;
+  left: 16px;
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  background: #061440;
+}
+
+.profile-body {
+  position: absolute;
+  bottom: -7px;
+  left: 8px;
+  width: 36px;
+  height: 27px;
+  border-radius: 50% 50% 0 0;
+  background: #061440;
+}
+
+.campaigns-panel {
+  width: 89%;
+  margin: 55px auto 0;
+  padding: 22px 4.5% 49px;
+  border-radius: 64px;
+  background: #061440;
+}
+
+.campaigns-panel > h1 {
+  margin: 0 0 22px;
+  font-size: 21px;
+  font-weight: 400;
+}
+
+.campaigns-empty {
+  min-height: 200px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 28px 20px;
+  border: 1px dashed rgba(255, 184, 46, 0.4);
+  border-radius: 17px;
+  text-align: center;
+}
+
+.campaigns-empty h2 {
+  margin: 0 0 14px;
+  font-size: 20px;
+  font-weight: 400;
+}
+
+.campaigns-empty p {
+  margin: 0 0 22px;
+  color: #aeb8d3;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.create-campaign-button {
+  min-height: 50px;
+  padding: 0 22px;
+  border: 0;
+  border-radius: 10px;
+  background: #ffb82e;
+  color: #061440;
+  font-size: 14px;
+  font-weight: 800;
+  transition: background 160ms ease;
+}
+
+.create-campaign-button:hover {
+  background: #ffd16e;
+}
+
+.campaigns-footer {
+  width: 87%;
+  min-height: 49px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: auto auto 38px;
+  padding: 12px;
+  border-radius: 30px;
+  background: #061440;
+  color: #aeb8d3;
+  font-size: 11px;
+  text-align: center;
+}
+
+/* ===== RESPONSIVIDADE ===== */
+
+@media (max-width: 800px) {
+  .topbar {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 16px;
+  }
+
+  .topbar-nav {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 8px;
+  }
+
+  .topbar-link {
+    min-width: auto;
+    padding: 10px 14px;
+  }
+
+  .campaigns-panel {
+    width: 92%;
+    margin-top: 32px;
+    padding: 24px;
+    border-radius: 32px;
+  }
+
+  .campaigns-empty {
+    padding: 28px 16px;
+  }
+
+  .campaigns-footer {
+    width: 92%;
+    margin-top: 80px;
+  }
+}
+
+@media (max-width: 480px) {
+  .brand img {
+    width: 46px;
+    height: 46px;
+  }
+
+  .topbar-nav {
+    gap: 4px;
+  }
+
+  .topbar-nav button {
+    font-size: 13px;
+  }
+
+ .profile-button {
+  width: 44px;
+  height: 44px;
+}
+
+  .campaigns-panel {
+    padding: 22px 16px;
+  }
+
+  .campaigns-empty h2 {
+    font-size: 18px;
+  }
+
+  .campaigns-empty p {
+    font-size: 14px;
+  }
+}
+
+.profile-button {
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.profile-button img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
