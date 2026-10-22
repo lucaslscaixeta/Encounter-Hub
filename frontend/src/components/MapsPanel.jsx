@@ -1,5 +1,127 @@
 import React from "react";
 
+// Tamanho da grade do mapa: pixels por quadrado e quantos quadrados
+// de largura e altura (em branco = acompanha o tamanho da imagem).
+function GridSettings({ map, onSave }) {
+  const [cellSize, setCellSize] = React.useState(String(map.grid_size));
+  const [columns, setColumns] = React.useState(
+    map.grid_columns ? String(map.grid_columns) : ""
+  );
+  const [rows, setRows] = React.useState(
+    map.grid_rows ? String(map.grid_rows) : ""
+  );
+  const [error, setError] = React.useState("");
+
+  function readGrid() {
+    const grid_size = Number(cellSize);
+
+    if (columns === "" && rows === "") {
+      return { grid_size, grid_columns: null, grid_rows: null };
+    }
+
+    if (columns === "" || rows === "") {
+      setError("Preencha a largura e a altura, ou deixe as duas em branco.");
+      return null;
+    }
+
+    return { grid_size, grid_columns: Number(columns), grid_rows: Number(rows) };
+  }
+
+  function handleSubmit(event) {
+    event.preventDefault();
+    setError("");
+
+    const grid = readGrid();
+
+    if (grid) {
+      onSave(grid);
+    }
+  }
+
+  function handleFit() {
+    setError("");
+
+    const grid = readGrid();
+
+    if (!grid) {
+      return;
+    }
+
+    if (!grid.grid_columns) {
+      setError("Defina a largura e a altura da grade para encaixar o mapa.");
+      return;
+    }
+
+    // Estica a imagem para cobrir exatamente a grade.
+    onSave({
+      ...grid,
+      x: 0,
+      y: 0,
+      width: grid.grid_columns * grid.grid_size,
+      height: grid.grid_rows * grid.grid_size,
+    });
+  }
+
+  return (
+    <form className="grid-settings" onSubmit={handleSubmit}>
+      <fieldset>
+        <legend>Grade</legend>
+
+        <label>
+          Quadrado (px)
+          <input
+            type="number"
+            min={10}
+            max={300}
+            value={cellSize}
+            onChange={(event) => setCellSize(event.target.value)}
+            required
+          />
+        </label>
+
+        <label>
+          Largura
+          <input
+            type="number"
+            min={1}
+            max={200}
+            placeholder="auto"
+            value={columns}
+            onChange={(event) => setColumns(event.target.value)}
+          />
+        </label>
+
+        <label>
+          Altura
+          <input
+            type="number"
+            min={1}
+            max={200}
+            placeholder="auto"
+            value={rows}
+            onChange={(event) => setRows(event.target.value)}
+          />
+        </label>
+      </fieldset>
+
+      {error && (
+        <p className="form-message" role="alert">
+          {error}
+        </p>
+      )}
+
+      <div className="form-actions">
+        <button className="text-button" type="submit">
+          Salvar grade
+        </button>
+        <button className="text-button" type="button" onClick={handleFit}>
+          Encaixar mapa na grade
+        </button>
+      </div>
+    </form>
+  );
+}
+
 // Painel do mestre para enviar mapas e escolher o que aparece na mesa.
 function MapsPanel({ maps, activeMapId, onUpload, onActivate, onUpdate, onDelete }) {
   const [file, setFile] = React.useState(null);
@@ -97,6 +219,11 @@ function MapsPanel({ maps, activeMapId, onUpload, onActivate, onUpdate, onDelete
 
       <h2 className="section-title">Mapas da campanha</h2>
 
+      <p className="muted form-tip">
+        Para alinhar o mapa com a grade, clique nele na mesa e arraste as
+        alças das bordas.
+      </p>
+
       {maps.length === 0 && <p className="muted">Nenhum mapa enviado.</p>}
 
       <ul className="map-list">
@@ -110,23 +237,11 @@ function MapsPanel({ maps, activeMapId, onUpload, onActivate, onUpdate, onDelete
                 {isActive && <span className="role-tag">Na mesa</span>}
               </div>
 
-              <label className="grid-size-field">
-                Grade
-                <input
-                  type="number"
-                  min={10}
-                  max={300}
-                  defaultValue={map.grid_size}
-                  onBlur={(event) => {
-                    const value = Number(event.target.value);
-
-                    if (value !== map.grid_size) {
-                      run(() => onUpdate(map.id, { grid_size: value }));
-                    }
-                  }}
-                />
-                px
-              </label>
+              <GridSettings
+                key={`${map.id}-${map.grid_size}-${map.grid_columns}-${map.grid_rows}`}
+                map={map}
+                onSave={(fields) => run(() => onUpdate(map.id, fields))}
+              />
 
               <div className="form-actions">
                 <button
@@ -136,6 +251,17 @@ function MapsPanel({ maps, activeMapId, onUpload, onActivate, onUpdate, onDelete
                 >
                   {isActive ? "Tirar da mesa" : "Mostrar na mesa"}
                 </button>
+                {map.width !== null && (
+                  <button
+                    className="text-button"
+                    type="button"
+                    onClick={() =>
+                      run(() => onUpdate(map.id, { width: null, height: null }))
+                    }
+                  >
+                    Tamanho original
+                  </button>
+                )}
                 <button
                   className="text-button danger"
                   type="button"

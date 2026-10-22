@@ -4,6 +4,7 @@ from flask import Blueprint, g, jsonify, request
 from autenticacao import login_required
 from banco import get_connection, get_member_role
 from mapas import delete_map_file
+from mesa_virtual import delete_token_image
 
 
 campaigns_bp = Blueprint("campaigns", __name__)
@@ -219,6 +220,17 @@ def delete_campaign(campaign_id):
             ).fetchall()
         ]
 
+        token_images = [
+            row["image_filename"]
+            for row in connection.execute(
+                """
+                SELECT image_filename FROM tokens
+                WHERE campaign_id = ? AND image_filename IS NOT NULL
+                """,
+                (campaign_id,)
+            ).fetchall()
+        ]
+
         connection.execute(
             "DELETE FROM campaigns WHERE id = ?",
             (campaign_id,)
@@ -226,6 +238,9 @@ def delete_campaign(campaign_id):
 
     for filename in filenames:
         delete_map_file(filename)
+
+    for filename in token_images:
+        delete_token_image(filename)
 
     return jsonify({"message": "Campanha excluída."}), 200
 

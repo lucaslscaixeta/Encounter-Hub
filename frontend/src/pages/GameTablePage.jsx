@@ -106,9 +106,17 @@ function GameTablePage({ campaignId, currentUser, onBack }) {
       );
     });
 
-    socket.on("token:movido", ({ id, x, y }) => {
+    socket.on("token:movido", ({ id, x, y, size }) => {
       setTokens((current) =>
-        current.map((token) => (token.id === id ? { ...token, x, y } : token))
+        current.map((token) =>
+          token.id === id ? { ...token, x, y, size } : token
+        )
+      );
+    });
+
+    socket.on("token:atualizado", (updated) => {
+      setTokens((current) =>
+        current.map((token) => (token.id === updated.id ? updated : token))
       );
     });
 
@@ -137,27 +145,48 @@ function GameTablePage({ campaignId, currentUser, onBack }) {
     return emitWithAck(socketRef.current, event, payload);
   }
 
-  async function handleMoveToken(tokenId, x, y) {
+  function replaceToken(updated) {
+    setTokens((current) =>
+      current.map((token) => (token.id === updated.id ? updated : token))
+    );
+  }
+
+  // Move e/ou redimensiona: changes = { x, y, size }.
+  async function handleUpdateToken(tokenId, changes) {
     const previous = tokens.find((token) => token.id === tokenId);
 
-    // Move na hora para quem arrastou; desfaz se o servidor recusar.
-    setTokens((current) =>
-      current.map((token) => (token.id === tokenId ? { ...token, x, y } : token))
-    );
+    // Aplica na hora para quem mexeu; desfaz se o servidor recusar.
+    replaceToken({ ...previous, ...changes });
 
-    const response = await emit("token:mover", { token_id: tokenId, x, y });
+    const response = await emit("token:mover", { token_id: tokenId, ...changes });
 
     if (response.error) {
       setNotice(response.error);
-      setTokens((current) =>
-        current.map((token) =>
-          token.id === tokenId ? { ...token, x: previous.x, y: previous.y } : token
-        )
-      );
+      replaceToken(previous);
     }
   }
 
-  async function handleCreateToken(fields) {
+  async function handleUploadTokenImage(tokenId, file) {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const data = await apiRequest(`/api/tokens/${tokenId}/image`, {
+      method: "POST",
+      formData,
+    });
+
+    replaceToken(data.token);
+  }
+
+  async function handleRemoveTokenImage(tokenId) {
+    const data = await apiRequest(`/api/tokens/${tokenId}/image`, {
+      method: "DELETE",
+    });
+
+    replaceToken(data.token);
+  }
+
+  async function handleCreateToken(fields, imageFile) {
     const data = await apiRequest(`/api/campaigns/${campaignId}/tokens`, {
       method: "POST",
       body: { ...fields, ...findFreeCell(tokens) },
@@ -168,6 +197,10 @@ function GameTablePage({ campaignId, currentUser, onBack }) {
         ? current
         : [...current, data.token]
     );
+
+    if (imageFile) {
+      await handleUploadTokenImage(data.token.id, imageFile);
+    }
   }
 
   async function handleDeleteToken(tokenId) {
@@ -202,6 +235,20 @@ function GameTablePage({ campaignId, currentUser, onBack }) {
     setActiveMap((current) =>
       current?.id === mapId ? { ...current, ...fields } : current
     );
+  }
+
+  async function handleResizeMap(box) {
+    const previous = activeMap;
+
+    // Aplica na hora; se o servidor recusar, volta ao tamanho anterior.
+    setActiveMap({ ...previous, ...box });
+
+    try {
+      await handleUpdateMap(previous.id, box);
+    } catch (error) {
+      setNotice(error.message);
+      setActiveMap(previous);
+    }
   }
 
   async function handleDeleteMap(mapId) {
@@ -282,10 +329,12 @@ function GameTablePage({ campaignId, currentUser, onBack }) {
             map={activeMap}
             tokens={tokens}
             currentUserId={currentUser.id}
+            canEditMap={isGameMaster}
             canMoveToken={(token) =>
               isGameMaster || token.owner_id === currentUser.id
             }
-            onMoveToken={handleMoveToken}
+            onUpdateToken={handleUpdateToken}
+            onUpdateMap={handleResizeMap}
           />
 
           {!activeMap && (
@@ -334,6 +383,8 @@ function GameTablePage({ campaignId, currentUser, onBack }) {
               isGameMaster={isGameMaster}
               onCreate={handleCreateToken}
               onDelete={handleDeleteToken}
+              onUploadImage={handleUploadTokenImage}
+              onRemoveImage={handleRemoveTokenImage}
             />
           )}
 

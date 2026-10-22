@@ -4,9 +4,11 @@ import secrets
 
 from datetime import datetime, timedelta, timezone
 from functools import wraps
+from urllib.parse import urlencode
 from flask import Blueprint, g, jsonify, request
 from werkzeug.security import check_password_hash, generate_password_hash
 from banco import get_connection
+from servico_email import enviar_email
 
 
 auth_bp = Blueprint("auth", __name__)
@@ -121,29 +123,80 @@ def register():
 
     password_hash = generate_password_hash(password)
 
-    # Por enquanto não há confirmação de e-mail: a conta já nasce ativa.
+    token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    expires_at = (
+        datetime.now(timezone.utc) + timedelta(hours=24)
+    ).isoformat()
+
     try:
         with get_connection() as connection:
-            connection.execute(
+            cursor = connection.execute(
                 """
                 INSERT INTO users (
                     name,
                     email,
                     password_hash,
-                    email_verified
+                    email_verified,
+                    verification_token_hash,
+                    verification_expires_at
                 )
-                VALUES (?, ?, ?, 1)
+                VALUES (?, ?, ?, 0, ?, ?)
                 """,
-                (name, email, password_hash)
+                (name, email, password_hash, token_hash, expires_at)
             )
+            user_id = cursor.lastrowid
 
     except sqlite3.IntegrityError:
         return jsonify({
             "error": "Este e-mail já está cadastrado."
         }), 409
 
+    verification_url = (
+    f"http://localhost:5000/api/verify-email?"
+    f"{urlencode({'token': token})}"
+)
+
+    conteudo = (
+        f"Olá, {name}!\n\n"
+        "Obrigado por se cadastrar no Encounter Hub.\n"
+        "Para confirmar seu endereço de e-mail, acesse:\n\n"
+        f"{verification_url}\n\n"
+        "Este link expira em 24 horas.\n"
+        "Se você não criou esta conta, ignore esta mensagem."
+    )
+
+    try:
+        enviado = enviar_email(
+            email,
+            "Confirme seu e-mail - Encounter Hub",
+            conteudo
+        )
+    except (ValueError, OSError):
+        enviado = False
+
+    if not enviado:
+        with get_connection() as connection:
+            connection.execute(
+                """
+                DELETE FROM users
+                WHERE id = ? AND email_verified = 0
+                """,
+                (user_id,)
+            )
+
+        return jsonify({
+            "error": (
+                "Não foi possível enviar o e-mail de confirmação. "
+                "Tente novamente mais tarde."
+            )
+        }), 503
+
     return jsonify({
-        "message": "Conta criada com sucesso! Você já pode entrar."
+        "message": (
+            "Cadastro realizado! Verifique seu e-mail "
+            "para ativar sua conta."
+        )
     }), 201
 
 
@@ -247,6 +300,11 @@ def login():
         return jsonify({
             "error": "E-mail ou senha incorretos."
         }), 401
+
+    if not user["email_verified"]:
+        return jsonify({
+            "error": "Confirme seu e-mail antes de entrar."
+        }), 403
 
     token = create_auth_token(user["id"])
 

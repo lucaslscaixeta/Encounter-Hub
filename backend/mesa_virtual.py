@@ -2,19 +2,23 @@ import json
 import re
 import threading
 
-from flask import Blueprint, g, jsonify, request
+from flask import Blueprint, g, jsonify, request, send_from_directory
 from flask_socketio import ConnectionRefusedError, join_room, leave_room
 from autenticacao import get_user_by_token, login_required
 from banco import get_connection, get_member_role
 from dados import roll_expression
 from extensoes import campaign_room, socketio
+from imagens import UPLOAD_ROOT, delete_image_file, save_uploaded_image
 from mapas import get_active_map, serialize_map
 
 
 table_bp = Blueprint("table", __name__)
 
+TOKEN_UPLOAD_DIR = UPLOAD_ROOT / "tokens"
+MAX_TOKEN_IMAGE_SIZE = 5 * 1024 * 1024
 COLOR_PATTERN = re.compile(r"^#[0-9a-fA-F]{6}$")
 MAX_GRID_POSITION = 500
+MAX_TOKEN_SIZE = 10
 MAX_MESSAGE_LENGTH = 1000
 MESSAGE_HISTORY = 100
 
@@ -32,8 +36,44 @@ def serialize_token(row):
         "name": row["name"],
         "color": row["color"],
         "x": row["x"],
-        "y": row["y"]
+        "y": row["y"],
+        "size": row["size"],
+        "image_url": (
+            f"/uploads/tokens/{row['image_filename']}"
+            if row["image_filename"] else None
+        )
     }
+
+
+def delete_token_image(filename):
+    delete_image_file(TOKEN_UPLOAD_DIR, filename)
+
+
+def read_token_size(value):
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+
+    return value if 1 <= value <= MAX_TOKEN_SIZE else None
+
+
+def get_editable_token(connection, token_id):
+    #Retorna (token, erro, status); o mestre edita todos, o jogador os seus.
+    row = connection.execute(
+        "SELECT * FROM tokens WHERE id = ?",
+        (token_id,)
+    ).fetchone()
+
+    role = row and get_member_role(
+        connection, row["campaign_id"], g.user["id"]
+    )
+
+    if row is None or role is None:
+        return None, "Token não encontrado.", 404
+
+    if role != "gm" and row["owner_id"] != g.user["id"]:
+        return None, "Você só pode alterar os seus tokens.", 403
+
+    return row, None, None
 
 
 def serialize_message(row):
@@ -183,6 +223,7 @@ def create_token(campaign_id):
     color = data.get("color", "#ffb82e")
     x = read_position(data.get("x", 0))
     y = read_position(data.get("y", 0))
+    size = read_token_size(data.get("size", 1))
     owner_id = data.get("owner_id", g.user["id"])
 
     if not isinstance(name, str) or not name.strip():
@@ -196,6 +237,11 @@ def create_token(campaign_id):
 
     if x is None or y is None:
         return jsonify({"error": "Posição inválida."}), 400
+
+    if size is None:
+        return jsonify({
+            "error": f"O tamanho deve ficar entre 1 e {MAX_TOKEN_SIZE} quadrados."
+        }), 400
 
     with get_connection() as connection:
         role = get_member_role(connection, campaign_id, g.user["id"])
@@ -214,10 +260,12 @@ def create_token(campaign_id):
 
         cursor = connection.execute(
             """
-            INSERT INTO tokens (campaign_id, owner_id, name, color, x, y)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO tokens (
+                campaign_id, owner_id, name, color, x, y, size
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (campaign_id, owner_id, name.strip(), color, x, y)
+            (campaign_id, owner_id, name.strip(), color, x, y, size)
         )
 
         row = connection.execute(
@@ -232,28 +280,89 @@ def create_token(campaign_id):
 
 
 
-@table_bp.route("/api/tokens/<int:token_id>", methods=["DELETE"])
+@table_bp.route("/uploads/tokens/<path:filename>", methods=["GET"])
+def serve_token_image(filename):
+    #Os nomes dos arquivos são aleatórios, então não são adivinháveis.
+    return send_from_directory(TOKEN_UPLOAD_DIR, filename)
+
+
+
+@table_bp.route("/api/tokens/<int:token_id>/image", methods=["POST"])
 @login_required
-def delete_token(token_id):
+def upload_token_image(token_id):
     with get_connection() as connection:
-        row = connection.execute(
+        row, error, status = get_editable_token(connection, token_id)
+
+    if row is None:
+        return jsonify({"error": error}), status
+
+    try:
+        filename = save_uploaded_image(
+            request.files.get("file"), TOKEN_UPLOAD_DIR, MAX_TOKEN_IMAGE_SIZE
+        )
+    except ValueError as upload_error:
+        return jsonify({"error": str(upload_error)}), 400
+
+    with get_connection() as connection:
+        connection.execute(
+            "UPDATE tokens SET image_filename = ? WHERE id = ?",
+            (filename, token_id)
+        )
+
+        updated = connection.execute(
             "SELECT * FROM tokens WHERE id = ?",
             (token_id,)
         ).fetchone()
 
-        role = row and get_member_role(
-            connection, row["campaign_id"], g.user["id"]
+    delete_token_image(row["image_filename"])
+
+    token = serialize_token(updated)
+    socketio.emit("token:atualizado", token, to=campaign_room(row["campaign_id"]))
+
+    return jsonify({"token": token}), 200
+
+
+
+@table_bp.route("/api/tokens/<int:token_id>/image", methods=["DELETE"])
+@login_required
+def remove_token_image(token_id):
+    with get_connection() as connection:
+        row, error, status = get_editable_token(connection, token_id)
+
+        if row is None:
+            return jsonify({"error": error}), status
+
+        connection.execute(
+            "UPDATE tokens SET image_filename = NULL WHERE id = ?",
+            (token_id,)
         )
 
-        if row is None or role is None:
-            return jsonify({"error": "Token não encontrado."}), 404
+        updated = connection.execute(
+            "SELECT * FROM tokens WHERE id = ?",
+            (token_id,)
+        ).fetchone()
 
-        if role != "gm" and row["owner_id"] != g.user["id"]:
-            return jsonify({
-                "error": "Você só pode remover os seus tokens."
-            }), 403
+    delete_token_image(row["image_filename"])
+
+    token = serialize_token(updated)
+    socketio.emit("token:atualizado", token, to=campaign_room(row["campaign_id"]))
+
+    return jsonify({"token": token}), 200
+
+
+
+@table_bp.route("/api/tokens/<int:token_id>", methods=["DELETE"])
+@login_required
+def delete_token(token_id):
+    with get_connection() as connection:
+        row, error, status = get_editable_token(connection, token_id)
+
+        if row is None:
+            return jsonify({"error": error}), status
 
         connection.execute("DELETE FROM tokens WHERE id = ?", (token_id,))
+
+    delete_token_image(row["image_filename"])
 
     socketio.emit(
         "token:removido",
@@ -348,6 +457,7 @@ def handle_leave_table(data):
 
 @socketio.on("token:mover")
 def handle_move_token(data):
+    #Move e/ou redimensiona o token; "size" é opcional.
     if not isinstance(data, dict):
         return {"error": "Dados inválidos."}
 
@@ -366,6 +476,13 @@ def handle_move_token(data):
     if row is None:
         return {"error": "Token não encontrado."}
 
+    size = read_token_size(data.get("size", row["size"]))
+
+    if size is None:
+        return {
+            "error": f"O tamanho deve ficar entre 1 e {MAX_TOKEN_SIZE} quadrados."
+        }
+
     user, role = require_member(row["campaign_id"])
 
     if user is None:
@@ -376,13 +493,13 @@ def handle_move_token(data):
 
     with get_connection() as connection:
         connection.execute(
-            "UPDATE tokens SET x = ?, y = ? WHERE id = ?",
-            (x, y, row["id"])
+            "UPDATE tokens SET x = ?, y = ?, size = ? WHERE id = ?",
+            (x, y, size, row["id"])
         )
 
     socketio.emit(
         "token:movido",
-        {"id": row["id"], "x": x, "y": y},
+        {"id": row["id"], "x": x, "y": y, "size": size},
         to=campaign_room(row["campaign_id"])
     )
     return {"ok": True}

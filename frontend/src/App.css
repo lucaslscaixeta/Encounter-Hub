@@ -1538,18 +1538,66 @@ textarea {
 
 .token-list li {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  gap: 8px;
   padding: 8px 10px;
   border-radius: 10px;
   background: #0b1b4a;
 }
 
+.token-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .token-dot {
-  width: 20px;
-  height: 20px;
+  width: 28px;
+  height: 28px;
   flex-shrink: 0;
   border-radius: 50%;
+}
+
+img.token-dot {
+  border: 2px solid;
+  object-fit: cover;
+}
+
+.file-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.file-button input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.file-button:focus-within {
+  outline: 2px solid #ffb82e;
+  outline-offset: 2px;
+}
+
+.form-tip {
+  margin: 0;
+  font-size: 13px;
+}
+
+.board-selection-hint {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  margin: 0;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: rgba(6, 20, 64, 0.9);
+  color: #ffd16e;
+  font-size: 13px;
+  pointer-events: none;
 }
 
 .token-name {
@@ -1589,20 +1637,47 @@ textarea {
   overflow-wrap: anywhere;
 }
 
-.grid-size-field {
+.grid-settings {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 8px;
-  color: #aeb8d3;
-  font-size: 13px;
 }
 
-.grid-size-field input {
-  width: 70px;
+.grid-settings fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.grid-settings legend {
+  margin-bottom: 4px;
+  color: #d6dcef;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.grid-settings label {
+  display: flex;
+  flex: 1 1 70px;
+  flex-direction: column;
+  gap: 4px;
+  color: #aeb8d3;
+  font-size: 12px;
+}
+
+.grid-settings input {
+  width: 100%;
   min-height: 32px;
   padding: 4px 8px;
   border: 0;
   border-radius: 8px;
+}
+
+.grid-settings .form-message {
+  margin: 0;
 }
 
 @media (max-width: 900px) {

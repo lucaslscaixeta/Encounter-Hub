@@ -27,6 +27,22 @@ def get_member_role(connection, campaign_id, user_id):
     return row["role"] if row else None
 
 
+def add_missing_columns(connection, table, columns):
+    #Adiciona colunas novas em bancos criados por versões anteriores.
+    existing = {
+        row["name"]
+        for row in connection.execute(
+            f"PRAGMA table_info({table})"
+        ).fetchall()
+    }
+
+    for name, definition in columns.items():
+        if name not in existing:
+            connection.execute(
+                f"ALTER TABLE {table} ADD COLUMN {name} {definition}"
+            )
+
+
 def init_db():
     with get_connection() as connection:
         connection.execute("""
@@ -121,6 +137,19 @@ def init_db():
             )
         """)
 
+        # Posição e tamanho da imagem na mesa, em pixels.
+        # width/height nulos = tamanho original da imagem.
+        # grid_columns/grid_rows: tamanho da grade em quadrados;
+        # nulos = a grade acompanha o tamanho da imagem.
+        add_missing_columns(connection, "maps", {
+            "x": "INTEGER NOT NULL DEFAULT 0",
+            "y": "INTEGER NOT NULL DEFAULT 0",
+            "width": "INTEGER",
+            "height": "INTEGER",
+            "grid_columns": "INTEGER",
+            "grid_rows": "INTEGER",
+        })
+
         # Sessões agendadas da campanha.
         # mode: "online" ou "presencial".
         # status: "agendada", "concluida" ou "cancelada".
@@ -166,6 +195,12 @@ def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+
+        # size: quantas células o token ocupa de lado (1 = 1x1).
+        add_missing_columns(connection, "tokens", {
+            "size": "INTEGER NOT NULL DEFAULT 1",
+            "image_filename": "TEXT",
+        })
 
         # kind: "message" (chat) ou "roll" (rolagem de dados).
         connection.execute("""

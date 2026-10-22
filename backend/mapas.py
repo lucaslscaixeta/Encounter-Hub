@@ -1,51 +1,58 @@
-import secrets
-
 from flask import Blueprint, g, jsonify, request, send_from_directory
 from autenticacao import login_required
-from banco import BASE_DIR, get_connection, get_member_role
+from banco import get_connection, get_member_role
 from extensoes import campaign_room, socketio
+from imagens import UPLOAD_ROOT, delete_image_file, save_uploaded_image
 
 
 maps_bp = Blueprint("maps", __name__)
 
-UPLOAD_DIR = BASE_DIR / "uploads" / "maps"
+UPLOAD_DIR = UPLOAD_ROOT / "maps"
 MAX_MAP_SIZE = 10 * 1024 * 1024
 
-# Assinatura dos primeiros bytes de cada formato aceito.
-IMAGE_SIGNATURES = {
-    ".png": lambda header: header.startswith(b"\x89PNG\r\n\x1a\n"),
-    ".jpg": lambda header: header.startswith(b"\xff\xd8\xff"),
-    ".gif": lambda header: header[:6] in (b"GIF87a", b"GIF89a"),
-    ".webp": lambda header: header[:4] == b"RIFF" and header[8:12] == b"WEBP",
-}
+# Limites da posição e do tamanho do mapa na mesa, em pixels.
+MAX_MAP_OFFSET = 60000
+MIN_MAP_DIMENSION = 20
+MAX_MAP_DIMENSION = 60000
+
+# Limite da grade em quadrados (também limita a posição dos tokens).
+MAX_GRID_CELLS = 200
 
 
 def serialize_map(row):
     if row is None:
         return None
 
+    # width/height nulos = tamanho original da imagem.
     return {
         "id": row["id"],
         "campaign_id": row["campaign_id"],
         "name": row["name"],
         "grid_size": row["grid_size"],
+        "x": row["x"],
+        "y": row["y"],
+        "width": row["width"],
+        "height": row["height"],
+        "grid_columns": row["grid_columns"],
+        "grid_rows": row["grid_rows"],
         "url": f"/uploads/maps/{row['filename']}"
     }
 
 
 def delete_map_file(filename):
-    path = UPLOAD_DIR / filename
-
-    if path.parent == UPLOAD_DIR and path.exists():
-        path.unlink()
+    delete_image_file(UPLOAD_DIR, filename)
 
 
-def detect_image_extension(header):
-    for extension, matches in IMAGE_SIGNATURES.items():
-        if matches(header):
-            return extension
+def read_int_in_range(value, minimum, maximum):
+    if isinstance(value, bool):
+        return None
 
-    return None
+    try:
+        number = round(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+    return number if minimum <= number <= maximum else None
 
 
 def read_grid_size(value):
@@ -124,9 +131,6 @@ def upload_map(campaign_id):
     name = request.form.get("name", "").strip()
     grid_size = read_grid_size(request.form.get("grid_size", 50))
 
-    if file is None or not file.filename:
-        return jsonify({"error": "Selecione a imagem do mapa."}), 400
-
     if grid_size is None:
         return jsonify({
             "error": "O tamanho da grade deve ficar entre 10 e 300 pixels."
@@ -138,23 +142,12 @@ def upload_map(campaign_id):
                 "error": "Apenas o mestre pode enviar mapas."
             }), 403
 
-    content = file.read(MAX_MAP_SIZE + 1)
-
-    if len(content) > MAX_MAP_SIZE:
-        return jsonify({"error": "O mapa deve ter no máximo 10 MB."}), 413
-
-    extension = detect_image_extension(content[:12])
-
-    if extension is None:
-        return jsonify({
-            "error": "Envie uma imagem PNG, JPG, WEBP ou GIF."
-        }), 400
+    try:
+        filename = save_uploaded_image(file, UPLOAD_DIR, MAX_MAP_SIZE)
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
 
     name = (name or file.filename.rsplit(".", 1)[0])[:80]
-    filename = f"{secrets.token_hex(16)}{extension}"
-
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    (UPLOAD_DIR / filename).write_bytes(content)
 
     with get_connection() as connection:
         cursor = connection.execute(
@@ -207,9 +200,64 @@ def update_map(map_id):
                 "error": "O tamanho da grade deve ficar entre 10 e 300 pixels."
             }), 400
 
+        # Posição e tamanho da imagem na mesa (o mestre ajusta arrastando).
+        x = read_int_in_range(
+            data.get("x", row["x"]), -MAX_MAP_OFFSET, MAX_MAP_OFFSET
+        )
+        y = read_int_in_range(
+            data.get("y", row["y"]), -MAX_MAP_OFFSET, MAX_MAP_OFFSET
+        )
+
+        if x is None or y is None:
+            return jsonify({"error": "Posição do mapa inválida."}), 400
+
+        width = data.get("width", row["width"])
+        height = data.get("height", row["height"])
+
+        # Os dois nulos voltam o mapa ao tamanho original da imagem.
+        if width is not None or height is not None:
+            width = read_int_in_range(
+                width, MIN_MAP_DIMENSION, MAX_MAP_DIMENSION
+            )
+            height = read_int_in_range(
+                height, MIN_MAP_DIMENSION, MAX_MAP_DIMENSION
+            )
+
+            if width is None or height is None:
+                return jsonify({
+                    "error": (
+                        f"O mapa deve ter entre {MIN_MAP_DIMENSION} e "
+                        f"{MAX_MAP_DIMENSION} pixels de largura e altura."
+                    )
+                }), 400
+
+        grid_columns = data.get("grid_columns", row["grid_columns"])
+        grid_rows = data.get("grid_rows", row["grid_rows"])
+
+        # Os dois nulos = a grade acompanha o tamanho da imagem.
+        if grid_columns is not None or grid_rows is not None:
+            grid_columns = read_int_in_range(grid_columns, 1, MAX_GRID_CELLS)
+            grid_rows = read_int_in_range(grid_rows, 1, MAX_GRID_CELLS)
+
+            if grid_columns is None or grid_rows is None:
+                return jsonify({
+                    "error": (
+                        "A grade deve ter entre 1 e "
+                        f"{MAX_GRID_CELLS} quadrados de largura e altura."
+                    )
+                }), 400
+
         connection.execute(
-            "UPDATE maps SET name = ?, grid_size = ? WHERE id = ?",
-            (name.strip()[:80], grid_size, map_id)
+            """
+            UPDATE maps
+            SET name = ?, grid_size = ?, x = ?, y = ?, width = ?, height = ?,
+                grid_columns = ?, grid_rows = ?
+            WHERE id = ?
+            """,
+            (
+                name.strip()[:80], grid_size, x, y, width, height,
+                grid_columns, grid_rows, map_id
+            )
         )
 
         broadcast_active_map(connection, row["campaign_id"])
