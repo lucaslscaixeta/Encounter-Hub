@@ -1,48 +1,11 @@
 import React from "react";
 import profileIcon from "./assets/profile-icon.png";
+import { apiRequest, getToken, onUnauthorized, setToken } from "./api.js";
+import CampaignDetailPage from "./pages/CampaignDetailPage.jsx";
+import CampaignsPage from "./pages/CampaignsPage.jsx";
+import GameTablePage from "./pages/GameTablePage.jsx";
+import SessionsPage from "./pages/SessionsPage.jsx";
 import "./App.css";
-
-function SessionsPage({ onGoToCampaigns }) {
-  const sessions = [];
-
-  return (
-    <section className="sessions-panel">
-      <h1>Suas sessões marcadas:</h1>
-
-      {sessions.length > 0 ? (
-        <div className="sessions-grid">
-          {sessions.map((session) => (
-            <article className="session-card" key={session.id}>
-              <h2>{session.title}</h2>
-              <p>Campanha: {session.campaign}</p>
-              <p>Data: {session.date}</p>
-              <p>Status: {session.status}</p>
-            </article>
-          ))}
-        </div>
-      ) : (
-        <div className="sessions-empty">
-          <h2>
-            Você, por enquanto, não está envolvido em nenhuma aventura.
-          </h2>
-
-          <p>
-            Que tal entrar em alguma campanha para participar?
-            Vai que você crie sua própria aventura!
-          </p>
-
-          <button
-            className="create-campaign-button"
-            type="button"
-            onClick={onGoToCampaigns}
-          >
-            Campanhas
-          </button>
-        </div>
-      )}
-    </section>
-  );
-}
 
 function CharactersPage() {
   function handleDownload() {
@@ -104,31 +67,25 @@ function CharactersPage() {
   );
 }
 
-function CampaignsPage() {
-  return (
-    <section className="campaigns-panel">
-      <h1>Suas campanhas</h1>
-
-      <div className="campaigns-empty">
-        <h2>Nenhuma campanha por enquanto</h2>
-
-        <p>
-          Crie sua primeira campanha e reúna seu grupo de aventureiros.
-        </p>
-
-        <button
-          className="create-campaign-button"
-          type="button"
-        >
-          Criar primeira campanha
-        </button>
-      </div>
-    </section>
-  );
-}
-
-function Dashboard({ onLogout }) {
+function Dashboard({ user, onLogout }) {
   const [activePage, setActivePage] = React.useState("campaigns");
+  const [openCampaignId, setOpenCampaignId] = React.useState(null);
+  const [tableCampaignId, setTableCampaignId] = React.useState(null);
+
+  function goToPage(page) {
+    setOpenCampaignId(null);
+    setActivePage(page);
+  }
+
+  if (tableCampaignId !== null) {
+    return (
+      <GameTablePage
+        campaignId={tableCampaignId}
+        currentUser={user}
+        onBack={() => setTableCampaignId(null)}
+      />
+    );
+  }
 
   return (
     <main className="campaigns-page">
@@ -168,7 +125,7 @@ function Dashboard({ onLogout }) {
               activePage === "campaigns" ? "active" : ""
             }`}
             type="button"
-            onClick={() => setActivePage("campaigns")}
+            onClick={() => goToPage("campaigns")}
           >
             Campanhas
           </button>
@@ -178,7 +135,7 @@ function Dashboard({ onLogout }) {
               activePage === "sessions" ? "active" : ""
             }`}
             type="button"
-            onClick={() => setActivePage("sessions")}
+            onClick={() => goToPage("sessions")}
           >
             Sessões
           </button>
@@ -188,18 +145,33 @@ function Dashboard({ onLogout }) {
               activePage === "characters" ? "active" : ""
             }`}
             type="button"
-            onClick={() => setActivePage("characters")}
+            onClick={() => goToPage("characters")}
           >
             Suas Fichas
           </button>
         </nav>
       </header>
 
-      {activePage === "campaigns" && <CampaignsPage />}
+      {activePage === "campaigns" && openCampaignId === null && (
+        <CampaignsPage
+          onOpenCampaign={setOpenCampaignId}
+          onOpenTable={setTableCampaignId}
+        />
+      )}
+
+      {activePage === "campaigns" && openCampaignId !== null && (
+        <CampaignDetailPage
+          campaignId={openCampaignId}
+          currentUser={user}
+          onBack={() => setOpenCampaignId(null)}
+          onOpenTable={setTableCampaignId}
+        />
+      )}
 
       {activePage === "sessions" && (
         <SessionsPage
-          onGoToCampaigns={() => setActivePage("campaigns")}
+          onGoToCampaigns={() => goToPage("campaigns")}
+          onOpenTable={setTableCampaignId}
         />
       )}
 
@@ -214,7 +186,9 @@ function Dashboard({ onLogout }) {
 
 
 function App() {
-  const [isLoggedIn, setIsLoggedIn] = React.useState(false);
+  const [user, setUser] = React.useState(null);
+  // Enquanto verifica um token salvo, evita mostrar a tela de login.
+  const [isRestoring, setIsRestoring] = React.useState(() => Boolean(getToken()));
   const [showRegister, setShowRegister] = React.useState(false);
   const [loginMessage, setLoginMessage] = React.useState("");
   const [isLoggingIn, setIsLoggingIn] = React.useState(false);
@@ -224,9 +198,36 @@ function App() {
   const [confirmPassword, setConfirmPassword] = React.useState("");
   const [registerMessage, setRegisterMessage] = React.useState("");
   const [isRegistering, setIsRegistering] = React.useState(false);
-  
 
-  
+  React.useEffect(() => {
+    onUnauthorized(() => {
+      setToken("");
+      setUser(null);
+      setLoginMessage("Sua sessão expirou. Entre novamente.");
+    });
+
+    if (!getToken()) {
+      return;
+    }
+
+    apiRequest("/api/me")
+      .then((data) => setUser(data.user))
+      .catch(() => setToken(""))
+      .finally(() => setIsRestoring(false));
+  }, []);
+
+  async function handleLogout() {
+    try {
+      await apiRequest("/api/logout", { method: "POST" });
+    } catch {
+      // Mesmo sem resposta do servidor, a sessão local é encerrada.
+    }
+
+    setToken("");
+    setUser(null);
+  }
+
+
 async function handleSubmit(event) {
   event.preventDefault();
   setLoginMessage("");
@@ -252,7 +253,8 @@ async function handleSubmit(event) {
       return;
     }
 
-    setIsLoggedIn(true);
+    setToken(data.token);
+    setUser(data.user);
   } catch {
     setLoginMessage(
       "Não foi possível conectar ao servidor. Verifique se o backend está ativo."
@@ -298,7 +300,7 @@ async function handleSubmit(event) {
         return;
       }
 
-      setRegisterMessage("Conta criada com sucesso! Você já pode entrar.");
+      setRegisterMessage(data.message);
       setRegisterName("");
       setRegisterEmail("");
       setRegisterPassword("");
@@ -312,8 +314,12 @@ async function handleSubmit(event) {
     }
   }
 
-  if (isLoggedIn) {
-    return <Dashboard onLogout={() => setIsLoggedIn(false)} />;
+  if (isRestoring) {
+    return <main className="login-page" />;
+  }
+
+  if (user) {
+    return <Dashboard user={user} onLogout={handleLogout} />;
   }
 
   if (showRegister) {
@@ -343,7 +349,7 @@ async function handleSubmit(event) {
                 type="text"
                 placeholder="Nome"
                 autoComplete="name"
-                maxLength={100}
+                maxLength={20}
                 value={registerName}
                 onChange={(event) => setRegisterName(event.target.value)}
                 required
