@@ -1,10 +1,12 @@
 import secrets
 
+from datetime import datetime
 from flask import Blueprint, g, jsonify, request
 from autenticacao import login_required
 from banco import get_connection, get_member_role
 from mapas import delete_map_file
 from mesa_virtual import delete_token_image
+from sessoes import SCHEDULE_FORMAT
 
 
 campaigns_bp = Blueprint("campaigns", __name__)
@@ -15,7 +17,7 @@ def generate_invite_code(connection):
         code = secrets.token_hex(4).upper()
 
         exists = connection.execute(
-            "SELECT 1 FROM campaigns WHERE invite_code = ?",
+            "SELECT 1 FROM campaigns WHERE invite_code = %s",
             (code,)
         ).fetchone()
 
@@ -51,7 +53,7 @@ def list_members(connection, campaign_id):
         SELECT users.id, users.name, campaign_members.role
         FROM campaign_members
         JOIN users ON users.id = campaign_members.user_id
-        WHERE campaign_members.campaign_id = ?
+        WHERE campaign_members.campaign_id = %s
         ORDER BY campaign_members.role = 'player', users.name
         """,
         (campaign_id,)
@@ -64,6 +66,10 @@ def list_members(connection, campaign_id):
 @campaigns_bp.route("/api/campaigns", methods=["GET"])
 @login_required
 def list_campaigns():
+    # As sessões ficam no horário local; o banco do Supabase roda em UTC,
+    # então o "agora" vem do backend.
+    now = datetime.now().strftime(SCHEDULE_FORMAT)
+
     with get_connection() as connection:
         rows = connection.execute(
             """
@@ -78,17 +84,16 @@ def list_campaigns():
                        SELECT MIN(scheduled_at) FROM game_sessions
                        WHERE game_sessions.campaign_id = campaigns.id
                          AND game_sessions.status = 'agendada'
-                         AND game_sessions.scheduled_at >=
-                             strftime('%Y-%m-%dT%H:%M', 'now', 'localtime')
+                         AND game_sessions.scheduled_at >= %s
                    ) AS next_session_at
             FROM campaigns
             JOIN campaign_members
                 ON campaign_members.campaign_id = campaigns.id
             JOIN users AS owner ON owner.id = campaigns.owner_id
-            WHERE campaign_members.user_id = ?
+            WHERE campaign_members.user_id = %s
             ORDER BY campaigns.created_at DESC
             """,
-            (g.user["id"],)
+            (now, g.user["id"])
         ).fetchall()
 
     return jsonify({"campaigns": [dict(row) for row in rows]}), 200
@@ -112,7 +117,8 @@ def create_campaign():
         cursor = connection.execute(
             """
             INSERT INTO campaigns (owner_id, name, description, invite_code)
-            VALUES (?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s)
+            RETURNING id
             """,
             (
                 g.user["id"],
@@ -121,12 +127,12 @@ def create_campaign():
                 generate_invite_code(connection)
             )
         )
-        campaign_id = cursor.lastrowid
+        campaign_id = cursor.fetchone()["id"]
 
         connection.execute(
             """
             INSERT INTO campaign_members (campaign_id, user_id, role)
-            VALUES (?, ?, 'gm')
+            VALUES (%s, %s, 'gm')
             """,
             (campaign_id, g.user["id"])
         )
@@ -151,7 +157,7 @@ def get_campaign(campaign_id):
             """
             SELECT id, owner_id, name, description, invite_code
             FROM campaigns
-            WHERE id = ?
+            WHERE id = %s
             """,
             (campaign_id,)
         ).fetchone()
@@ -193,8 +199,8 @@ def update_campaign(campaign_id):
 
         connection.execute(
             """
-            UPDATE campaigns SET name = ?, description = ?
-            WHERE id = ?
+            UPDATE campaigns SET name = %s, description = %s
+            WHERE id = %s
             """,
             (fields["name"], fields["description"], campaign_id)
         )
@@ -215,7 +221,7 @@ def delete_campaign(campaign_id):
         filenames = [
             row["filename"]
             for row in connection.execute(
-                "SELECT filename FROM maps WHERE campaign_id = ?",
+                "SELECT filename FROM maps WHERE campaign_id = %s",
                 (campaign_id,)
             ).fetchall()
         ]
@@ -225,14 +231,14 @@ def delete_campaign(campaign_id):
             for row in connection.execute(
                 """
                 SELECT image_filename FROM tokens
-                WHERE campaign_id = ? AND image_filename IS NOT NULL
+                WHERE campaign_id = %s AND image_filename IS NOT NULL
                 """,
                 (campaign_id,)
             ).fetchall()
         ]
 
         connection.execute(
-            "DELETE FROM campaigns WHERE id = ?",
+            "DELETE FROM campaigns WHERE id = %s",
             (campaign_id,)
         )
 
@@ -263,7 +269,7 @@ def join_campaign():
 
     with get_connection() as connection:
         campaign = connection.execute(
-            "SELECT id, name FROM campaigns WHERE invite_code = ?",
+            "SELECT id, name FROM campaigns WHERE invite_code = %s",
             (code,)
         ).fetchone()
 
@@ -279,7 +285,7 @@ def join_campaign():
         connection.execute(
             """
             INSERT INTO campaign_members (campaign_id, user_id, role)
-            VALUES (?, ?, 'player')
+            VALUES (%s, %s, 'player')
             """,
             (campaign["id"], g.user["id"])
         )
@@ -306,7 +312,7 @@ def regenerate_invite_code(campaign_id):
         code = generate_invite_code(connection)
 
         connection.execute(
-            "UPDATE campaigns SET invite_code = ? WHERE id = ?",
+            "UPDATE campaigns SET invite_code = %s WHERE id = %s",
             (code, campaign_id)
         )
 
@@ -341,7 +347,7 @@ def remove_member(campaign_id, user_id):
         connection.execute(
             """
             DELETE FROM campaign_members
-            WHERE campaign_id = ? AND user_id = ?
+            WHERE campaign_id = %s AND user_id = %s
             """,
             (campaign_id, user_id)
         )
@@ -349,8 +355,8 @@ def remove_member(campaign_id, user_id):
         connection.execute(
             """
             DELETE FROM session_attendance
-            WHERE user_id = ? AND session_id IN (
-                SELECT id FROM game_sessions WHERE campaign_id = ?
+            WHERE user_id = %s AND session_id IN (
+                SELECT id FROM game_sessions WHERE campaign_id = %s
             )
             """,
             (user_id, campaign_id)

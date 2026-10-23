@@ -1,4 +1,3 @@
-import sqlite3
 import hashlib
 import secrets
 
@@ -6,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from functools import wraps
 from urllib.parse import urlencode
 from flask import Blueprint, g, jsonify, request
+from psycopg.errors import UniqueViolation
 from werkzeug.security import check_password_hash, generate_password_hash
 from banco import get_connection
 from servico_email import enviar_email
@@ -28,7 +28,7 @@ def create_auth_token(user_id):
         connection.execute(
             """
             INSERT INTO auth_tokens (user_id, token_hash, expires_at)
-            VALUES (?, ?, ?)
+            VALUES (%s, %s, %s)
             """,
             (user_id, hash_token(token), expires_at)
         )
@@ -47,7 +47,7 @@ def get_user_by_token(token):
                    auth_tokens.expires_at
             FROM auth_tokens
             JOIN users ON users.id = auth_tokens.user_id
-            WHERE auth_tokens.token_hash = ?
+            WHERE auth_tokens.token_hash = %s
             """,
             (hash_token(token),)
         ).fetchone()
@@ -141,13 +141,14 @@ def register():
                     verification_token_hash,
                     verification_expires_at
                 )
-                VALUES (?, ?, ?, 0, ?, ?)
+                VALUES (%s, %s, %s, 0, %s, %s)
+                RETURNING id
                 """,
                 (name, email, password_hash, token_hash, expires_at)
             )
-            user_id = cursor.lastrowid
+            user_id = cursor.fetchone()["id"]
 
-    except sqlite3.IntegrityError:
+    except UniqueViolation:
         return jsonify({
             "error": "Este e-mail já está cadastrado."
         }), 409
@@ -180,7 +181,7 @@ def register():
             connection.execute(
                 """
                 DELETE FROM users
-                WHERE id = ? AND email_verified = 0
+                WHERE id = %s AND email_verified = 0
                 """,
                 (user_id,)
             )
@@ -216,7 +217,7 @@ def verify_email():
             """
             SELECT id, email_verified, verification_expires_at
             FROM users
-            WHERE verification_token_hash = ?
+            WHERE verification_token_hash = %s
             """,
             (token_hash,)
         ).fetchone()
@@ -249,7 +250,7 @@ def verify_email():
             SET email_verified = 1,
                 verification_token_hash = NULL,
                 verification_expires_at = NULL
-            WHERE id = ?
+            WHERE id = %s
             """,
             (user["id"],)
         )
@@ -289,7 +290,7 @@ def login():
             """
             SELECT id, name, email, password_hash, email_verified
             FROM users
-            WHERE email = ?
+            WHERE email = %s
             """,
             (email,)
         ).fetchone()
@@ -327,7 +328,7 @@ def logout():
 
     with get_connection() as connection:
         connection.execute(
-            "DELETE FROM auth_tokens WHERE token_hash = ?",
+            "DELETE FROM auth_tokens WHERE token_hash = %s",
             (token_hash,)
         )
 

@@ -32,8 +32,9 @@ export function onUnauthorized(handler) {
   unauthorizedHandler = handler;
 }
 
+// As imagens vêm do Supabase Storage com a URL completa.
 export function assetUrl(path) {
-  return `${API_URL}${path}`;
+  return /^https?:\/\//.test(path) ? path : `${API_URL}${path}`;
 }
 
 export async function apiRequest(path, { method = "GET", body, formData } = {}) {

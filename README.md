@@ -13,10 +13,18 @@ pip install -r requirements.txt
 python app.py
 ```
 
-O cadastro envia um e-mail de confirmação, e a conta só pode entrar depois de
-confirmada. Copie `backend/.env.example` para `backend/.env` e preencha
-`MAIL_USERNAME`, `MAIL_PASSWORD` (senha de app do Gmail) e `MAIL_DEFAULT_SENDER`.
-As contas ficam salvas no SQLite (`backend/encounter_hub.db`).
+Antes de subir, copie `backend/.env.example` para `backend/.env` e preencha:
+
+- **Supabase**: no botão "Connect" do painel, a aba "Direct" (Shared pooler,
+  porta 5432) dá a `DATABASE_URL`, e a aba "Server" dá `SUPABASE_URL` e
+  `SUPABASE_SECRET_KEY`. As tabelas (`backend/schema.sql`) são criadas quando o
+  backend sobe, e o bucket de imagens no primeiro envio.
+- **E-mail**: `MAIL_USERNAME`, `MAIL_PASSWORD` (senha de app do Gmail) e
+  `MAIL_DEFAULT_SENDER`. O cadastro envia um e-mail de confirmação, e a conta só
+  pode entrar depois de confirmada.
+
+Os dados ficam no Postgres do Supabase e as imagens de mapas e tokens no
+Supabase Storage, então todo o grupo compartilha o mesmo banco.
 
 Frontend (React + Vite):
 
@@ -48,7 +56,9 @@ npm run dev
 | Arquivo | Responsabilidade |
 | --- | --- |
 | `app.py` | Ponto de entrada; registra as rotas e o Socket.IO |
-| `banco.py` | Conexão com o SQLite e criação das tabelas |
+| `banco.py` | Conexão com o Postgres do Supabase (pool de conexões) |
+| `schema.sql` | Criação das tabelas, executada quando o backend sobe |
+| `imagens.py` | Validação e envio de imagens para o Supabase Storage |
 | `autenticacao.py` | Cadastro, confirmação de e-mail, login com token |
 | `campanhas.py` | Campanhas, convites e participantes |
 | `sessoes.py` | Agendamento de sessões e confirmação de presença |

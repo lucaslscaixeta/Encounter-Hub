@@ -87,16 +87,15 @@ def attach_attendance(connection, sessions):
 
     members_by_campaign = {}
     rows = connection.execute(
-        f"""
+        """
         SELECT campaign_members.campaign_id, users.id, users.name,
                campaign_members.role
         FROM campaign_members
         JOIN users ON users.id = campaign_members.user_id
-        WHERE campaign_members.campaign_id IN
-            ({",".join("?" * len(campaign_ids))})
+        WHERE campaign_members.campaign_id = ANY(%s)
         ORDER BY users.name
         """,
-        campaign_ids
+        (campaign_ids,)
     ).fetchall()
 
     for row in rows:
@@ -104,12 +103,12 @@ def attach_attendance(connection, sessions):
 
     statuses = {}
     rows = connection.execute(
-        f"""
+        """
         SELECT session_id, user_id, status
         FROM session_attendance
-        WHERE session_id IN ({",".join("?" * len(session_ids))})
+        WHERE session_id = ANY(%s)
         """,
-        session_ids
+        (session_ids,)
     ).fetchall()
 
     for row in rows:
@@ -141,7 +140,7 @@ def get_session_with_role(connection, session_id):
         SELECT {SESSION_COLUMNS}
         FROM game_sessions
         JOIN campaigns ON campaigns.id = game_sessions.campaign_id
-        WHERE game_sessions.id = ?
+        WHERE game_sessions.id = %s
         """,
         (session_id,)
     ).fetchone()
@@ -162,10 +161,10 @@ def list_my_sessions():
     today = datetime.now().strftime("%Y-%m-%dT00:00")
 
     if period == "anteriores":
-        condition = "game_sessions.scheduled_at < ?"
+        condition = "game_sessions.scheduled_at < %s"
         order = "DESC"
     else:
-        condition = "game_sessions.scheduled_at >= ?"
+        condition = "game_sessions.scheduled_at >= %s"
         order = "ASC"
 
     with get_connection() as connection:
@@ -176,7 +175,7 @@ def list_my_sessions():
             JOIN campaigns ON campaigns.id = game_sessions.campaign_id
             JOIN campaign_members
                 ON campaign_members.campaign_id = campaigns.id
-               AND campaign_members.user_id = ?
+               AND campaign_members.user_id = %s
             WHERE {condition}
             ORDER BY game_sessions.scheduled_at {order}
             """,
@@ -206,7 +205,7 @@ def list_campaign_sessions(campaign_id):
             SELECT {SESSION_COLUMNS}
             FROM game_sessions
             JOIN campaigns ON campaigns.id = game_sessions.campaign_id
-            WHERE game_sessions.campaign_id = ?
+            WHERE game_sessions.campaign_id = %s
             ORDER BY game_sessions.scheduled_at DESC
             """,
             (campaign_id,)
@@ -240,13 +239,14 @@ def create_session(campaign_id):
                 "error": "Apenas o mestre pode marcar sessões."
             }), 403
 
-        cursor = connection.execute(
+        session_id = connection.execute(
             """
             INSERT INTO game_sessions (
                 campaign_id, title, description, scheduled_at,
                 mode, location
             )
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING id
             """,
             (
                 campaign_id,
@@ -256,20 +256,20 @@ def create_session(campaign_id):
                 fields["mode"],
                 fields["location"]
             )
-        )
+        ).fetchone()["id"]
 
         # O mestre já fica confirmado na sessão que marcou.
         connection.execute(
             """
             INSERT INTO session_attendance (session_id, user_id, status)
-            VALUES (?, ?, 'confirmado')
+            VALUES (%s, %s, 'confirmado')
             """,
-            (cursor.lastrowid, g.user["id"])
+            (session_id, g.user["id"])
         )
 
     return jsonify({
         "message": "Sessão marcada!",
-        "session_id": cursor.lastrowid
+        "session_id": session_id
     }), 201
 
 
@@ -309,10 +309,10 @@ def update_session(session_id):
                 "error": "Informe o local da sessão presencial."
             }), 400
 
-        assignments = ", ".join(f"{key} = ?" for key in fields)
+        assignments = ", ".join(f"{key} = %s" for key in fields)
 
         connection.execute(
-            f"UPDATE game_sessions SET {assignments} WHERE id = ?",
+            f"UPDATE game_sessions SET {assignments} WHERE id = %s",
             (*fields.values(), session_id)
         )
 
@@ -335,7 +335,7 @@ def delete_session(session_id):
             }), 403
 
         connection.execute(
-            "DELETE FROM game_sessions WHERE id = ?",
+            "DELETE FROM game_sessions WHERE id = %s",
             (session_id,)
         )
 
@@ -375,7 +375,7 @@ def set_attendance(session_id):
         connection.execute(
             """
             INSERT INTO session_attendance (session_id, user_id, status)
-            VALUES (?, ?, ?)
+            VALUES (%s, %s, %s)
             ON CONFLICT (session_id, user_id)
             DO UPDATE SET status = excluded.status,
                           updated_at = CURRENT_TIMESTAMP
