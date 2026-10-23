@@ -21,3 +21,5 @@ frontend/dist/
 # Banco de dados local
 backend/*.db
 backend/*.db-journal
+# Mapas enviados
+backend/uploads/
