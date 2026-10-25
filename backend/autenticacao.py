@@ -340,3 +340,205 @@ def logout():
 @login_required
 def me():
     return jsonify({"user": g.user}), 200
+
+
+@auth_bp.route("/api/forgot-password", methods=["POST"])
+def forgot_password():
+    data = request.get_json(silent=True)
+
+    if not isinstance(data, dict):
+        return jsonify({
+            "error": "Envie os dados em formato JSON."
+        }), 400
+
+    email = data.get("email", "")
+
+    if not isinstance(email, str):
+        return jsonify({
+            "error": "Informe um e-mail válido."
+        }), 400
+
+    email = email.strip().lower()
+
+    if not email or len(email) > 254 or "@" not in email:
+        return jsonify({
+            "error": "Informe um e-mail válido."
+        }), 400
+
+    # A resposta é a mesma, exista ou não uma conta com esse e-mail.
+    mensagem = (
+        "Se houver uma conta cadastrada com esse e-mail, "
+        "você receberá as instruções para redefinir sua senha."
+    )
+
+    with get_connection() as connection:
+        user = connection.execute(
+            """
+            SELECT id, name, email
+            FROM users
+            WHERE email = %s
+            """,
+            (email,)
+        ).fetchone()
+
+        if user is None:
+            return jsonify({"message": mensagem}), 200
+
+        token = secrets.token_urlsafe(32)
+        token_hash = hash_token(token)
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+
+        # Invalida solicitações anteriores do mesmo usuário.
+        connection.execute(
+            "DELETE FROM password_reset_tokens WHERE user_id = %s",
+            (user["id"],)
+        )
+
+        connection.execute(
+            """
+            INSERT INTO password_reset_tokens (
+                user_id, token_hash, expires_at
+            )
+            VALUES (%s, %s, %s)
+            """,
+            (user["id"], token_hash, expires_at)
+        )
+
+    frontend_url = "http://localhost:5173"
+    reset_url = (
+        f"{frontend_url}/?reset_token={token}"
+    )
+
+    conteudo = (
+        f"Olá, {user['name']}!\n\n"
+        "Recebemos uma solicitação para redefinir sua senha "
+        "no Encounter Hub.\n\n"
+        "Para cadastrar uma nova senha, acesse o link:\n\n"
+        f"{reset_url}\n\n"
+        "Este link expira em 1 hora e pode ser utilizado apenas uma vez.\n"
+        "Se você não solicitou a recuperação, ignore este e-mail."
+    )
+
+    try:
+        enviado = enviar_email(
+            user["email"],
+            "Recuperação de senha - Encounter Hub",
+            conteudo
+        )
+    except (ValueError, OSError):
+        enviado = False
+
+    if not enviado:
+        with get_connection() as connection:
+            connection.execute(
+                """
+                DELETE FROM password_reset_tokens
+                WHERE user_id = %s AND token_hash = %s
+                """,
+                (user["id"], token_hash)
+            )
+
+    return jsonify({"message": mensagem}), 200
+
+
+@auth_bp.route("/api/reset-password", methods=["POST"])
+def reset_password():
+    data = request.get_json(silent=True)
+
+    if not isinstance(data, dict):
+        return jsonify({
+            "error": "Envie os dados em formato JSON."
+        }), 400
+
+    token = data.get("token", "")
+    password = data.get("password", "")
+
+    if not isinstance(token, str) or not isinstance(password, str):
+        return jsonify({
+            "error": "Os dados enviados são inválidos."
+        }), 400
+
+    token = token.strip()
+
+    if not token:
+        return jsonify({
+            "error": "Link de recuperação inválido ou expirado."
+        }), 400
+
+    if len(password) < 8:
+        return jsonify({
+            "error": "A senha deve ter pelo menos 8 caracteres."
+        }), 400
+
+    if len(password) > 1024:
+        return jsonify({
+            "error": "A senha é muito longa."
+        }), 400
+
+    token_hash = hash_token(token)
+
+    with get_connection() as connection:
+        reset = connection.execute(
+            """
+            SELECT user_id, expires_at
+            FROM password_reset_tokens
+            WHERE token_hash = %s
+            """,
+            (token_hash,)
+        ).fetchone()
+
+        if reset is None:
+            return jsonify({
+                "error": "Link de recuperação inválido ou expirado."
+            }), 400
+
+        expires_at = reset["expires_at"]
+
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+        if datetime.now(timezone.utc) >= expires_at:
+            connection.execute(
+                """
+                DELETE FROM password_reset_tokens
+                WHERE token_hash = %s
+                """,
+                (token_hash,)
+            )
+
+            return jsonify({
+                "error": "Link de recuperação inválido ou expirado."
+            }), 400
+
+        password_hash = generate_password_hash(password)
+
+        connection.execute(
+            """
+            UPDATE users
+            SET password_hash = %s
+            WHERE id = %s
+            """,
+            (password_hash, reset["user_id"])
+        )
+
+        # O link só pode ser utilizado uma vez.
+        connection.execute(
+            """
+            DELETE FROM password_reset_tokens
+            WHERE user_id = %s
+            """,
+            (reset["user_id"],)
+        )
+
+        # Encerra sessões antigas após a troca de senha.
+        connection.execute(
+            """
+            DELETE FROM auth_tokens
+            WHERE user_id = %s
+            """,
+            (reset["user_id"],)
+        )
+
+    return jsonify({
+        "message": "Senha redefinida com sucesso! Você já pode entrar."
+    }), 200

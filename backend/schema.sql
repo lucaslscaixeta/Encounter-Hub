@@ -22,6 +22,18 @@ CREATE TABLE IF NOT EXISTS auth_tokens (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Tokens temporários para recuperação de senha.
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL
+        REFERENCES users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE password_reset_tokens ENABLE ROW LEVEL SECURITY;
+
 -- A campanha é a mesa permanente (como um "jogo" do Roll20):
 -- os membros podem entrar no mapa a qualquer momento.
 CREATE TABLE IF NOT EXISTS campaigns (
