@@ -2,19 +2,25 @@ import json
 import re
 import threading
 
-from flask import Blueprint, g, jsonify, request, send_from_directory
+from flask import Blueprint, g, jsonify, request
 from flask_socketio import ConnectionRefusedError, join_room, leave_room
 from autenticacao import get_user_by_token, login_required
 from banco import get_connection, get_member_role
 from dados import roll_expression
 from extensoes import campaign_room, socketio
-from imagens import UPLOAD_ROOT, delete_image_file, save_uploaded_image
+from imagens import (
+    StorageError,
+    delete_image_file,
+    public_url,
+    save_uploaded_image,
+)
 from mapas import get_active_map, serialize_map
 
 
 table_bp = Blueprint("table", __name__)
 
-TOKEN_UPLOAD_DIR = UPLOAD_ROOT / "tokens"
+# Pasta das imagens de tokens dentro do bucket do Supabase Storage.
+TOKENS_FOLDER = "tokens"
 MAX_TOKEN_IMAGE_SIZE = 5 * 1024 * 1024
 COLOR_PATTERN = re.compile(r"^#[0-9a-fA-F]{6}$")
 MAX_GRID_POSITION = 500
@@ -38,15 +44,17 @@ def serialize_token(row):
         "x": row["x"],
         "y": row["y"],
         "size": row["size"],
-        "image_url": (
-            f"/uploads/tokens/{row['image_filename']}"
-            if row["image_filename"] else None
-        )
+        "image_url": public_url(TOKENS_FOLDER, row["image_filename"])
     }
 
 
 def delete_token_image(filename):
-    delete_image_file(TOKEN_UPLOAD_DIR, filename)
+    delete_image_file(TOKENS_FOLDER, filename)
+
+
+def is_id(value):
+    #O Postgres recusa comparar um id com texto ou listas vindos do navegador.
+    return isinstance(value, int) and not isinstance(value, bool)
 
 
 def read_token_size(value):
@@ -59,7 +67,7 @@ def read_token_size(value):
 def get_editable_token(connection, token_id):
     #Retorna (token, erro, status); o mestre edita todos, o jogador os seus.
     row = connection.execute(
-        "SELECT * FROM tokens WHERE id = ?",
+        "SELECT * FROM tokens WHERE id = %s",
         (token_id,)
     ).fetchone()
 
@@ -83,8 +91,8 @@ def serialize_message(row):
         "content": row["content"],
         "roll": json.loads(row["roll_data"]) if row["roll_data"] else None,
         "user": {"id": row["user_id"], "name": row["user_name"]},
-        # O SQLite grava CURRENT_TIMESTAMP em UTC.
-        "created_at": row["created_at"].replace(" ", "T") + "Z"
+        # TIMESTAMPTZ: o isoformat já inclui o fuso horário.
+        "created_at": row["created_at"].isoformat()
     }
 
 
@@ -96,10 +104,11 @@ def read_position(value):
 
 
 def save_message(connection, campaign_id, user_id, kind, content, roll=None):
-    cursor = connection.execute(
+    message_id = connection.execute(
         """
         INSERT INTO messages (campaign_id, user_id, kind, content, roll_data)
-        VALUES (?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s)
+        RETURNING id
         """,
         (
             campaign_id,
@@ -108,16 +117,16 @@ def save_message(connection, campaign_id, user_id, kind, content, roll=None):
             content,
             json.dumps(roll) if roll else None
         )
-    )
+    ).fetchone()["id"]
 
     row = connection.execute(
         """
         SELECT messages.*, users.name AS user_name
         FROM messages
         LEFT JOIN users ON users.id = messages.user_id
-        WHERE messages.id = ?
+        WHERE messages.id = %s
         """,
-        (cursor.lastrowid,)
+        (message_id,)
     ).fetchone()
 
     return serialize_message(row)
@@ -154,20 +163,20 @@ def get_table(campaign_id):
             return jsonify({"error": "Campanha não encontrada."}), 404
 
         campaign = connection.execute(
-            "SELECT id, name, owner_id FROM campaigns WHERE id = ?",
+            "SELECT id, name, owner_id FROM campaigns WHERE id = %s",
             (campaign_id,)
         ).fetchone()
 
         maps = connection.execute(
             """
-            SELECT * FROM maps WHERE campaign_id = ?
+            SELECT * FROM maps WHERE campaign_id = %s
             ORDER BY created_at DESC
             """,
             (campaign_id,)
         ).fetchall()
 
         tokens = connection.execute(
-            "SELECT * FROM tokens WHERE campaign_id = ? ORDER BY id",
+            "SELECT * FROM tokens WHERE campaign_id = %s ORDER BY id",
             (campaign_id,)
         ).fetchall()
 
@@ -177,10 +186,10 @@ def get_table(campaign_id):
                 SELECT messages.*, users.name AS user_name
                 FROM messages
                 LEFT JOIN users ON users.id = messages.user_id
-                WHERE messages.campaign_id = ?
+                WHERE messages.campaign_id = %s
                 ORDER BY messages.id DESC
-                LIMIT ?
-            )
+                LIMIT %s
+            ) AS recent
             ORDER BY id
             """,
             (campaign_id, MESSAGE_HISTORY)
@@ -191,7 +200,7 @@ def get_table(campaign_id):
             SELECT users.id, users.name, campaign_members.role
             FROM campaign_members
             JOIN users ON users.id = campaign_members.user_id
-            WHERE campaign_members.campaign_id = ?
+            WHERE campaign_members.campaign_id = %s
             ORDER BY users.name
             """,
             (campaign_id,)
@@ -243,6 +252,9 @@ def create_token(campaign_id):
             "error": f"O tamanho deve ficar entre 1 e {MAX_TOKEN_SIZE} quadrados."
         }), 400
 
+    if owner_id is not None and not is_id(owner_id):
+        return jsonify({"error": "Dono do token inválido."}), 400
+
     with get_connection() as connection:
         role = get_member_role(connection, campaign_id, g.user["id"])
 
@@ -258,32 +270,21 @@ def create_token(campaign_id):
         ) is None:
             return jsonify({"error": "O dono do token não está na campanha."}), 400
 
-        cursor = connection.execute(
+        row = connection.execute(
             """
             INSERT INTO tokens (
                 campaign_id, owner_id, name, color, x, y, size
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            RETURNING *
             """,
             (campaign_id, owner_id, name.strip(), color, x, y, size)
-        )
-
-        row = connection.execute(
-            "SELECT * FROM tokens WHERE id = ?",
-            (cursor.lastrowid,)
         ).fetchone()
 
     token = serialize_token(row)
     socketio.emit("token:criado", token, to=campaign_room(campaign_id))
 
     return jsonify({"token": token}), 201
-
-
-
-@table_bp.route("/uploads/tokens/<path:filename>", methods=["GET"])
-def serve_token_image(filename):
-    #Os nomes dos arquivos são aleatórios, então não são adivinháveis.
-    return send_from_directory(TOKEN_UPLOAD_DIR, filename)
 
 
 
@@ -298,19 +299,24 @@ def upload_token_image(token_id):
 
     try:
         filename = save_uploaded_image(
-            request.files.get("file"), TOKEN_UPLOAD_DIR, MAX_TOKEN_IMAGE_SIZE
+            request.files.get("file"), TOKENS_FOLDER, MAX_TOKEN_IMAGE_SIZE
         )
     except ValueError as upload_error:
         return jsonify({"error": str(upload_error)}), 400
+    except StorageError as upload_error:
+        print(f"Erro ao enviar imagem de token para o Storage: {upload_error}")
+        return jsonify({
+            "error": "Não foi possível salvar a imagem. Tente novamente."
+        }), 502
 
     with get_connection() as connection:
         connection.execute(
-            "UPDATE tokens SET image_filename = ? WHERE id = ?",
+            "UPDATE tokens SET image_filename = %s WHERE id = %s",
             (filename, token_id)
         )
 
         updated = connection.execute(
-            "SELECT * FROM tokens WHERE id = ?",
+            "SELECT * FROM tokens WHERE id = %s",
             (token_id,)
         ).fetchone()
 
@@ -333,12 +339,12 @@ def remove_token_image(token_id):
             return jsonify({"error": error}), status
 
         connection.execute(
-            "UPDATE tokens SET image_filename = NULL WHERE id = ?",
+            "UPDATE tokens SET image_filename = NULL WHERE id = %s",
             (token_id,)
         )
 
         updated = connection.execute(
-            "SELECT * FROM tokens WHERE id = ?",
+            "SELECT * FROM tokens WHERE id = %s",
             (token_id,)
         ).fetchone()
 
@@ -360,7 +366,7 @@ def delete_token(token_id):
         if row is None:
             return jsonify({"error": error}), status
 
-        connection.execute("DELETE FROM tokens WHERE id = ?", (token_id,))
+        connection.execute("DELETE FROM tokens WHERE id = %s", (token_id,))
 
     delete_token_image(row["image_filename"])
 
@@ -467,10 +473,13 @@ def handle_move_token(data):
     if x is None or y is None:
         return {"error": "Posição inválida."}
 
+    if not is_id(data.get("token_id")):
+        return {"error": "Token não encontrado."}
+
     with get_connection() as connection:
         row = connection.execute(
-            "SELECT * FROM tokens WHERE id = ?",
-            (data.get("token_id"),)
+            "SELECT * FROM tokens WHERE id = %s",
+            (data["token_id"],)
         ).fetchone()
 
     if row is None:
@@ -493,7 +502,7 @@ def handle_move_token(data):
 
     with get_connection() as connection:
         connection.execute(
-            "UPDATE tokens SET x = ?, y = ?, size = ? WHERE id = ?",
+            "UPDATE tokens SET x = %s, y = %s, size = %s WHERE id = %s",
             (x, y, size, row["id"])
         )
 

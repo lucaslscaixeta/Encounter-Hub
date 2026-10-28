@@ -1,13 +1,19 @@
-from flask import Blueprint, g, jsonify, request, send_from_directory
+from flask import Blueprint, g, jsonify, request
 from autenticacao import login_required
 from banco import get_connection, get_member_role
 from extensoes import campaign_room, socketio
-from imagens import UPLOAD_ROOT, delete_image_file, save_uploaded_image
+from imagens import (
+    StorageError,
+    delete_image_file,
+    public_url,
+    save_uploaded_image,
+)
 
 
 maps_bp = Blueprint("maps", __name__)
 
-UPLOAD_DIR = UPLOAD_ROOT / "maps"
+# Pasta dos mapas dentro do bucket do Supabase Storage.
+MAPS_FOLDER = "maps"
 MAX_MAP_SIZE = 10 * 1024 * 1024
 
 # Limites da posição e do tamanho do mapa na mesa, em pixels.
@@ -35,12 +41,12 @@ def serialize_map(row):
         "height": row["height"],
         "grid_columns": row["grid_columns"],
         "grid_rows": row["grid_rows"],
-        "url": f"/uploads/maps/{row['filename']}"
+        "url": public_url(MAPS_FOLDER, row["filename"])
     }
 
 
 def delete_map_file(filename):
-    delete_image_file(UPLOAD_DIR, filename)
+    delete_image_file(MAPS_FOLDER, filename)
 
 
 def read_int_in_range(value, minimum, maximum):
@@ -66,7 +72,7 @@ def read_grid_size(value):
 
 def get_map_with_role(connection, map_id):
     row = connection.execute(
-        "SELECT * FROM maps WHERE id = ?",
+        "SELECT * FROM maps WHERE id = %s",
         (map_id,)
     ).fetchone()
 
@@ -81,7 +87,7 @@ def get_active_map(connection, campaign_id):
         """
         SELECT maps.* FROM campaigns
         JOIN maps ON maps.id = campaigns.active_map_id
-        WHERE campaigns.id = ?
+        WHERE campaigns.id = %s
         """,
         (campaign_id,)
     ).fetchone()
@@ -98,13 +104,6 @@ def broadcast_active_map(connection, campaign_id):
 
 
 
-@maps_bp.route("/uploads/maps/<path:filename>", methods=["GET"])
-def serve_map(filename):
-    #Os nomes dos arquivos são aleatórios, então não são adivinháveis.
-    return send_from_directory(UPLOAD_DIR, filename)
-
-
-
 @maps_bp.route("/api/campaigns/<int:campaign_id>/maps", methods=["GET"])
 @login_required
 def list_maps(campaign_id):
@@ -114,7 +113,7 @@ def list_maps(campaign_id):
 
         rows = connection.execute(
             """
-            SELECT * FROM maps WHERE campaign_id = ?
+            SELECT * FROM maps WHERE campaign_id = %s
             ORDER BY created_at DESC
             """,
             (campaign_id,)
@@ -143,24 +142,25 @@ def upload_map(campaign_id):
             }), 403
 
     try:
-        filename = save_uploaded_image(file, UPLOAD_DIR, MAX_MAP_SIZE)
+        filename = save_uploaded_image(file, MAPS_FOLDER, MAX_MAP_SIZE)
     except ValueError as error:
         return jsonify({"error": str(error)}), 400
+    except StorageError as error:
+        print(f"Erro ao enviar mapa para o Storage: {error}")
+        return jsonify({
+            "error": "Não foi possível salvar o mapa. Tente novamente."
+        }), 502
 
     name = (name or file.filename.rsplit(".", 1)[0])[:80]
 
     with get_connection() as connection:
-        cursor = connection.execute(
+        row = connection.execute(
             """
             INSERT INTO maps (campaign_id, name, filename, grid_size)
-            VALUES (?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s)
+            RETURNING *
             """,
             (campaign_id, name, filename, grid_size)
-        )
-
-        row = connection.execute(
-            "SELECT * FROM maps WHERE id = ?",
-            (cursor.lastrowid,)
         ).fetchone()
 
     return jsonify({
@@ -250,9 +250,9 @@ def update_map(map_id):
         connection.execute(
             """
             UPDATE maps
-            SET name = ?, grid_size = ?, x = ?, y = ?, width = ?, height = ?,
-                grid_columns = ?, grid_rows = ?
-            WHERE id = ?
+            SET name = %s, grid_size = %s, x = %s, y = %s, width = %s, height = %s,
+                grid_columns = %s, grid_rows = %s
+            WHERE id = %s
             """,
             (
                 name.strip()[:80], grid_size, x, y, width, height,
@@ -280,7 +280,7 @@ def delete_map(map_id):
                 "error": "Apenas o mestre pode excluir mapas."
             }), 403
 
-        connection.execute("DELETE FROM maps WHERE id = ?", (map_id,))
+        connection.execute("DELETE FROM maps WHERE id = %s", (map_id,))
         broadcast_active_map(connection, row["campaign_id"])
 
     delete_map_file(row["filename"])
@@ -302,6 +302,11 @@ def set_active_map(campaign_id):
 
     map_id = data.get("map_id")
 
+    if map_id is not None and (
+        not isinstance(map_id, int) or isinstance(map_id, bool)
+    ):
+        return jsonify({"error": "Mapa não encontrado."}), 404
+
     with get_connection() as connection:
         if get_member_role(connection, campaign_id, g.user["id"]) != "gm":
             return jsonify({
@@ -310,7 +315,7 @@ def set_active_map(campaign_id):
 
         if map_id is not None:
             exists = connection.execute(
-                "SELECT 1 FROM maps WHERE id = ? AND campaign_id = ?",
+                "SELECT 1 FROM maps WHERE id = %s AND campaign_id = %s",
                 (map_id, campaign_id)
             ).fetchone()
 
@@ -318,7 +323,7 @@ def set_active_map(campaign_id):
                 return jsonify({"error": "Mapa não encontrado."}), 404
 
         connection.execute(
-            "UPDATE campaigns SET active_map_id = ? WHERE id = ?",
+            "UPDATE campaigns SET active_map_id = %s WHERE id = %s",
             (map_id, campaign_id)
         )
 
