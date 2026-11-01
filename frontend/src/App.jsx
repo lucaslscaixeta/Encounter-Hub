@@ -5,6 +5,7 @@ import CampaignDetailPage from "./pages/CampaignDetailPage.jsx";
 import CampaignsPage from "./pages/CampaignsPage.jsx";
 import GameTablePage from "./pages/GameTablePage.jsx";
 import SessionsPage from "./pages/SessionsPage.jsx";
+import ProfilePage from "./pages/ProfilePage.jsx";
 import "./App.css";
 
 function CharactersPage() {
@@ -67,7 +68,7 @@ function CharactersPage() {
   );
 }
 
-function Dashboard({ user, onLogout }) {
+function Dashboard({ user, onUserUpdate, onLogout }) {
   const [activePage, setActivePage] = React.useState("campaigns");
   const [openCampaignId, setOpenCampaignId] = React.useState(null);
   const [tableCampaignId, setTableCampaignId] = React.useState(null);
@@ -88,7 +89,7 @@ function Dashboard({ user, onLogout }) {
   }
 
   return (
-    <main className="campaigns-page">
+    <main className={`campaigns-page ${activePage === "profile" ? "profile-active" : ""}`}>
       <header className="topbar">
         <div className="brand">
           <img
@@ -113,11 +114,12 @@ function Dashboard({ user, onLogout }) {
           </button>
 
           <button
-            className="profile-button"
-            type="button"
-            aria-label="Perfil do usuário"
+             className="profile-button"
+             type="button"
+             aria-label="Perfil do usuário"
+             onClick={() => goToPage("profile")}
           >
-            <img src={profileIcon} alt="" />
+             <img src={user?.avatar_url || profileIcon} alt="" />
           </button>
 
           <button
@@ -176,6 +178,14 @@ function Dashboard({ user, onLogout }) {
       )}
 
       {activePage === "characters" && <CharactersPage />}
+
+      {activePage === "profile" && (
+        <ProfilePage
+          user={user}
+          onBack={() => goToPage("campaigns")}
+          onUserUpdate={onUserUpdate}
+        />
+      )}
 
       <footer className="campaigns-footer">
         © 2026 Encounter Hub. Todos os direitos reservados.
@@ -431,9 +441,14 @@ function handleBackToLogin() {
   }
 
   if (user) {
-    return <Dashboard user={user} onLogout={handleLogout} />;
-  }
-
+  return (
+    <Dashboard
+      user={user}
+      onUserUpdate={setUser}
+      onLogout={handleLogout}
+    />
+  );
+}
   if (showResetPassword) {
   return (
     <main className="login-page">
