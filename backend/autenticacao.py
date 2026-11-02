@@ -9,6 +9,12 @@ from psycopg.errors import UniqueViolation
 from werkzeug.security import check_password_hash, generate_password_hash
 from banco import get_connection
 from servico_email import enviar_email
+from imagens import (
+    save_uploaded_image,
+    delete_image_file,
+    public_url,
+    StorageError,
+)
 
 
 auth_bp = Blueprint("auth", __name__)
@@ -44,6 +50,7 @@ def get_user_by_token(token):
         row = connection.execute(
             """
             SELECT users.id, users.name, users.email,
+                   users.avatar_filename,
                    auth_tokens.expires_at
             FROM auth_tokens
             JOIN users ON users.id = auth_tokens.user_id
@@ -58,7 +65,12 @@ def get_user_by_token(token):
     if datetime.now(timezone.utc) >= datetime.fromisoformat(row["expires_at"]):
         return None
 
-    return {"id": row["id"], "name": row["name"], "email": row["email"]}
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "email": row["email"],
+        "avatar_url": public_url("avatars", row["avatar_filename"]),
+    }
 
 
 def get_request_token():
@@ -71,7 +83,7 @@ def get_request_token():
 
 
 def login_required(view):
-    #Exige o cabeçalho "Authorization: Bearer <token>" e preenche g.user.
+    # Exige o cabeçalho "Authorization: Bearer <token>" e preenche g.user.
     @wraps(view)
     def wrapper(*args, **kwargs):
         user = get_user_by_token(get_request_token())
@@ -154,9 +166,9 @@ def register():
         }), 409
 
     verification_url = (
-    f"http://localhost:5000/api/verify-email?"
-    f"{urlencode({'token': token})}"
-)
+        f"http://localhost:5000/api/verify-email?"
+        f"{urlencode({'token': token})}"
+    )
 
     conteudo = (
         f"Olá, {name}!\n\n"
@@ -260,7 +272,6 @@ def verify_email():
     }), 200
 
 
-
 @auth_bp.route("/api/login", methods=["POST"])
 def login():
     data = request.get_json(silent=True)
@@ -288,7 +299,8 @@ def login():
     with get_connection() as connection:
         user = connection.execute(
             """
-            SELECT id, name, email, password_hash, email_verified
+            SELECT id, name, email, password_hash,
+                   email_verified, avatar_filename
             FROM users
             WHERE email = %s
             """,
@@ -315,10 +327,10 @@ def login():
         "user": {
             "id": user["id"],
             "name": user["name"],
-            "email": user["email"]
+            "email": user["email"],
+            "avatar_url": public_url("avatars", user["avatar_filename"]),
         }
     }), 200
-
 
 
 @auth_bp.route("/api/logout", methods=["POST"])
@@ -335,11 +347,97 @@ def logout():
     return jsonify({"message": "Você saiu da sua conta."}), 200
 
 
-
 @auth_bp.route("/api/me", methods=["GET"])
 @login_required
 def me():
     return jsonify({"user": g.user}), 200
+
+
+@auth_bp.route("/api/me", methods=["PATCH"])
+@login_required
+def update_profile():
+    data = request.get_json(silent=True)
+
+    if not isinstance(data, dict):
+        return jsonify({
+            "error": "Envie os dados em formato JSON."
+        }), 400
+
+    name = data.get("name", "").strip()
+
+    if not name:
+        return jsonify({
+            "error": "O nome não pode ficar vazio."
+        }), 400
+
+    if len(name) > 20:
+        return jsonify({
+            "error": "O nome deve ter no máximo 20 caracteres."
+        }), 400
+
+    with get_connection() as connection:
+        connection.execute(
+            "UPDATE users SET name = %s WHERE id = %s",
+            (name, g.user["id"])
+        )
+
+    return jsonify({
+        "message": "Perfil atualizado com sucesso!",
+        "user": {
+            **g.user,
+            "name": name
+        }
+    }), 200
+
+
+@auth_bp.route("/api/me/avatar", methods=["POST"])
+@login_required
+def update_profile_avatar():
+    image = request.files.get("avatar")
+
+    try:
+        new_filename = save_uploaded_image(
+            image,
+            "avatars",
+            5 * 1024 * 1024
+        )
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    except StorageError as error:
+        return jsonify({"error": str(error)}), 502
+
+    old_filename = None
+
+    try:
+        with get_connection() as connection:
+            user = connection.execute(
+                "SELECT avatar_filename FROM users WHERE id = %s",
+                (g.user["id"],)
+            ).fetchone()
+
+            old_filename = user["avatar_filename"]
+
+            connection.execute(
+                "UPDATE users SET avatar_filename = %s WHERE id = %s",
+                (new_filename, g.user["id"])
+            )
+
+    except Exception:
+        delete_image_file("avatars", new_filename)
+        raise
+
+    if old_filename:
+        delete_image_file("avatars", old_filename)
+
+    avatar_url = public_url("avatars", new_filename)
+
+    return jsonify({
+        "message": "Foto de perfil atualizada com sucesso!",
+        "user": {
+            **g.user,
+            "avatar_url": avatar_url
+        }
+    }), 200
 
 
 @auth_bp.route("/api/forgot-password", methods=["POST"])
@@ -405,9 +503,7 @@ def forgot_password():
         )
 
     frontend_url = "http://localhost:5173"
-    reset_url = (
-        f"{frontend_url}/?reset_token={token}"
-    )
+    reset_url = f"{frontend_url}/?reset_token={token}"
 
     conteudo = (
         f"Olá, {user['name']}!\n\n"
