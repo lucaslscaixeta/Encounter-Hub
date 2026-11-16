@@ -95,6 +95,10 @@ CREATE TABLE IF NOT EXISTS game_sessions (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Quando o aviso de ausências foi enviado ao mestre (nulo = ainda não).
+ALTER TABLE game_sessions
+    ADD COLUMN IF NOT EXISTS gm_reminder_sent_at TIMESTAMPTZ;
+
 -- status: "confirmado", "talvez" ou "recusado".
 CREATE TABLE IF NOT EXISTS session_attendance (
     session_id INTEGER NOT NULL REFERENCES game_sessions(id) ON DELETE CASCADE,

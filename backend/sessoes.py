@@ -2,6 +2,7 @@ from datetime import datetime
 from flask import Blueprint, g, jsonify, request
 from autenticacao import login_required
 from banco import get_connection, get_member_role
+from extensoes import socketio
 
 
 sessions_bp = Blueprint("sessions", __name__)
@@ -311,12 +312,33 @@ def update_session(session_id):
 
         assignments = ", ".join(f"{key} = %s" for key in fields)
 
+        # Nova data: o mestre pode receber um novo aviso de ausências.
+        if fields.get("scheduled_at", session["scheduled_at"]) != session["scheduled_at"]:
+            assignments += ", gm_reminder_sent_at = NULL"
+
         connection.execute(
             f"UPDATE game_sessions SET {assignments} WHERE id = %s",
             (*fields.values(), session_id)
         )
 
-    return jsonify({"message": "Sessão atualizada!"}), 200
+    cancelled = (
+        session["status"] != "cancelada"
+        and fields.get("status") == "cancelada"
+    )
+
+    if cancelled:
+        # Importado aqui porque avisos.py também importa este módulo.
+        from avisos import notify_cancellation
+
+        # O envio leva alguns segundos; não segura a resposta ao mestre.
+        socketio.start_background_task(notify_cancellation, session_id)
+
+    return jsonify({
+        "message": (
+            "Sessão cancelada. Quem confirmou ou marcou talvez será avisado por e-mail."
+            if cancelled else "Sessão atualizada!"
+        )
+    }), 200
 
 
 
