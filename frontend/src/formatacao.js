@@ -15,6 +15,7 @@ export function formatSessionDate(value) {
   const time = date.toLocaleTimeString("pt-BR", {
     hour: "2-digit",
     minute: "2-digit",
+    hourCycle: "h23",
   });
 
   return `${day} às ${time}`;
@@ -24,7 +25,13 @@ export function formatMessageTime(value) {
   return new Date(value).toLocaleTimeString("pt-BR", {
     hour: "2-digit",
     minute: "2-digit",
+    hourCycle: "h23",
   });
+}
+
+// Hora cheia no formato de 24 horas: 9 -> "09:00", 24 -> "24:00" (meia-noite).
+export function formatHour(hour) {
+  return `${String(hour).padStart(2, "0")}:00`;
 }
 
 export const ATTENDANCE_LABELS = {

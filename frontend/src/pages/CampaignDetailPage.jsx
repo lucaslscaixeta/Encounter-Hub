@@ -1,5 +1,6 @@
 import React from "react";
 import { apiRequest } from "../api.js";
+import AvailabilityPanel from "../components/AvailabilityPanel.jsx";
 import SessionCard from "../components/SessionCard.jsx";
 import SessionForm from "../components/SessionForm.jsx";
 
@@ -177,6 +178,13 @@ function CampaignDetailPage({ campaignId, currentUser, onBack, onOpenTable }) {
               />
             ))}
           </div>
+
+          <AvailabilityPanel
+            campaignId={campaign.id}
+            currentUser={currentUser}
+            isGameMaster={isGameMaster}
+            onSessionCreated={loadData}
+          />
 
           {pastSessions.length > 0 && (
             <>

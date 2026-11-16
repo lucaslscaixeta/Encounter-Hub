@@ -362,4 +362,14 @@ def remove_member(campaign_id, user_id):
             (user_id, campaign_id)
         )
 
+        connection.execute(
+            """
+            DELETE FROM availability_slots
+            WHERE user_id = %s AND poll_id IN (
+                SELECT id FROM availability_polls WHERE campaign_id = %s
+            )
+            """,
+            (user_id, campaign_id)
+        )
+
     return jsonify({"message": "Membro removido."}), 200

@@ -6,6 +6,7 @@ from campanhas import campaigns_bp
 from extensoes import socketio
 from mapas import MAX_MAP_SIZE, maps_bp
 from mesa_virtual import table_bp
+from disponibilidade import availability_bp
 from sessoes import sessions_bp
 
 
@@ -23,6 +24,7 @@ app.register_blueprint(table_bp)
 
 socketio.init_app(app)
 
+app.register_blueprint(availability_bp)
 
 
 @app.route("/")

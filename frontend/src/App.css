@@ -346,6 +346,7 @@ button {
 
 .panel-form input[type="text"],
 .panel-form input[type="number"],
+.panel-form input[type="date"],
 .panel-form input[type="datetime-local"],
 .panel-form input[type="file"],
 .panel-form select,
@@ -1946,4 +1947,217 @@ img.token-dot {
   .sessions-empty p {
     font-size: 14px;
   }
+}
+
+/* ===== DISPONIBILIDADE ===== */
+
+.availability-panel,
+.poll-view {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 28px;
+}
+
+.form-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.form-row label {
+  flex: 1 1 140px;
+}
+
+.poll-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.poll-list button {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  padding: 14px 18px;
+  border: 1px solid rgba(255, 184, 46, 0.3);
+  border-radius: 14px;
+  background: var(--panel);
+  color: var(--white);
+  text-align: left;
+  font: inherit;
+}
+
+.poll-list button:hover,
+.poll-list button:focus-visible {
+  border-color: var(--gold);
+}
+
+.poll-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-weight: 700;
+}
+
+.availability-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 20px;
+}
+
+.availability-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.availability-heading h3,
+.poll-view h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.availability-grid-scroll {
+  overflow-x: auto;
+  padding-bottom: 6px;
+}
+
+.availability-grid {
+  display: grid;
+  gap: 3px;
+  min-width: max-content;
+  user-select: none;
+}
+
+/* Sem rolagem pelo toque na grade editável, para o arrasto pintar. */
+.availability-grid.editable .availability-cell {
+  touch-action: none;
+}
+
+.availability-day,
+.availability-hour {
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.availability-day {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 4px;
+  text-transform: capitalize;
+}
+
+.availability-day small {
+  font-size: 11px;
+}
+
+.availability-hour {
+  align-self: center;
+  padding-right: 6px;
+  text-align: right;
+}
+
+.availability-cell {
+  display: block;
+  min-height: 26px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--navy);
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.availability-cell.selected {
+  border-color: var(--gold);
+  background: var(--gold);
+}
+
+.availability-cell:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.availability-cell:focus-visible {
+  outline: 2px solid var(--white);
+  outline-offset: 1px;
+}
+
+/* No mapa do grupo, a cor fica mais forte quanto maior a fração (--share). */
+.availability-cell.group {
+  background: color-mix(
+    in srgb,
+    var(--gold) calc(var(--share) * 100%),
+    var(--surface)
+  );
+}
+
+.availability-cell.group.everyone {
+  border-color: var(--white);
+}
+
+.availability-cell.group.focused {
+  outline: 2px solid var(--white);
+  outline-offset: 1px;
+}
+
+.availability-legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.availability-legend .availability-cell {
+  width: 22px;
+  min-height: 16px;
+  cursor: default;
+}
+
+.availability-people,
+.best-slots {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.availability-people .available {
+  color: #7ee2a8;
+}
+
+.availability-people .unavailable {
+  color: var(--muted);
+}
+
+.best-slots li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+
+.best-slots li > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.best-slots strong {
+  text-transform: capitalize;
 }
