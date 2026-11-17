@@ -95,6 +95,10 @@ CREATE TABLE IF NOT EXISTS game_sessions (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Quando o aviso de ausências foi enviado ao mestre (nulo = ainda não).
+ALTER TABLE game_sessions
+    ADD COLUMN IF NOT EXISTS gm_reminder_sent_at TIMESTAMPTZ;
+
 -- status: "confirmado", "talvez" ou "recusado".
 CREATE TABLE IF NOT EXISTS session_attendance (
     session_id INTEGER NOT NULL REFERENCES game_sessions(id) ON DELETE CASCADE,
@@ -144,3 +148,35 @@ ALTER TABLE tokens ENABLE ROW LEVEL SECURITY;
 ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE users
 ADD COLUMN IF NOT EXISTS avatar_filename TEXT;
+
+-- Enquetes de disponibilidade: o mestre escolhe um período de dias e uma
+-- faixa de horário, e cada membro marca os blocos de 1 hora em que pode.
+-- start_date/end_date: "2026-11-20" (inclusivos), no horário local.
+-- start_hour/end_hour: hora inicial (0-23) e final (1-24, exclusiva).
+-- status: "aberta" ou "encerrada".
+-- session_id: sessão marcada a partir da enquete, quando houver.
+CREATE TABLE IF NOT EXISTS availability_polls (
+    id SERIAL PRIMARY KEY,
+    campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    start_date TEXT NOT NULL,
+    end_date TEXT NOT NULL,
+    start_hour INTEGER NOT NULL,
+    end_hour INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'aberta',
+    session_id INTEGER REFERENCES game_sessions(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Blocos em que cada membro está disponível.
+-- slot: início do bloco de 1 hora, no horário local ("2026-11-20T19:00").
+CREATE TABLE IF NOT EXISTS availability_slots (
+    poll_id INTEGER NOT NULL
+        REFERENCES availability_polls(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    slot TEXT NOT NULL,
+    PRIMARY KEY (poll_id, user_id, slot)
+);
+
+ALTER TABLE availability_polls ENABLE ROW LEVEL SECURITY;
+ALTER TABLE availability_slots ENABLE ROW LEVEL SECURITY;

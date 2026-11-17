@@ -9,8 +9,16 @@ const EMPTY_SESSION = {
   description: "",
 };
 
+// Horários de 30 em 30 minutos no formato de 24 horas ("00:00" a "23:30").
+// O campo nativo datetime-local segue o idioma do sistema e pode mostrar AM/PM.
+const TIME_OPTIONS = Array.from({ length: 48 }, (_, index) => {
+  const hour = String(Math.floor(index / 2)).padStart(2, "0");
+  return `${hour}:${index % 2 ? "30" : "00"}`;
+});
+
 // Cria uma sessão nova ou edita a sessão recebida em "session".
-function SessionForm({ campaignId, session, onSaved, onCancel }) {
+// "initialValues" preenche uma sessão nova (ex.: horário vindo da enquete).
+function SessionForm({ campaignId, session, initialValues, onSaved, onCancel }) {
   const [fields, setFields] = React.useState(() =>
     session
       ? {
@@ -20,13 +28,25 @@ function SessionForm({ campaignId, session, onSaved, onCancel }) {
           location: session.location,
           description: session.description,
         }
-      : EMPTY_SESSION
+      : { ...EMPTY_SESSION, ...initialValues }
   );
   const [message, setMessage] = React.useState("");
   const [isSaving, setIsSaving] = React.useState(false);
 
+  // scheduled_at fica como "2026-11-20T19:00", dividido em data e hora na tela.
+  const scheduledDate = fields.scheduled_at.slice(0, 10);
+  const scheduledTime = fields.scheduled_at.slice(11, 16);
+  const timeOptions =
+    scheduledTime && !TIME_OPTIONS.includes(scheduledTime)
+      ? [...TIME_OPTIONS, scheduledTime].sort()
+      : TIME_OPTIONS;
+
   function updateField(event) {
     setFields({ ...fields, [event.target.name]: event.target.value });
+  }
+
+  function updateSchedule(date, time) {
+    setFields({ ...fields, scheduled_at: `${date}T${time}` });
   }
 
   async function handleSubmit(event) {
@@ -35,19 +55,21 @@ function SessionForm({ campaignId, session, onSaved, onCancel }) {
     setIsSaving(true);
 
     try {
+      let data;
+
       if (session) {
-        await apiRequest(`/api/sessions/${session.id}`, {
+        data = await apiRequest(`/api/sessions/${session.id}`, {
           method: "PUT",
           body: fields,
         });
       } else {
-        await apiRequest(`/api/campaigns/${campaignId}/sessions`, {
+        data = await apiRequest(`/api/campaigns/${campaignId}/sessions`, {
           method: "POST",
           body: fields,
         });
       }
 
-      onSaved();
+      await onSaved(data);
     } catch (error) {
       setMessage(error.message);
     } finally {
@@ -72,16 +94,35 @@ function SessionForm({ campaignId, session, onSaved, onCancel }) {
         />
       </label>
 
-      <label>
-        Data e horário
-        <input
-          name="scheduled_at"
-          type="datetime-local"
-          value={fields.scheduled_at}
-          onChange={updateField}
-          required
-        />
-      </label>
+      <div className="form-row">
+        <label>
+          Data
+          <input
+            type="date"
+            value={scheduledDate}
+            onChange={(event) => updateSchedule(event.target.value, scheduledTime)}
+            required
+          />
+        </label>
+
+        <label>
+          Horário
+          <select
+            value={scheduledTime}
+            onChange={(event) => updateSchedule(scheduledDate, event.target.value)}
+            required
+          >
+            <option value="" disabled>
+              Escolha
+            </option>
+            {timeOptions.map((time) => (
+              <option key={time} value={time}>
+                {time}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
 
       <fieldset className="mode-options">
         <legend>Formato</legend>
