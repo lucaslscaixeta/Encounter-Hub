@@ -13,6 +13,7 @@ from extensoes import socketio
 from manutencao import cleanup_loop
 from mapas import MAX_MAP_SIZE, maps_bp
 from mesa_virtual import table_bp
+from personagens import characters_bp
 from sessoes import sessions_bp
 
 
@@ -37,6 +38,7 @@ app.register_blueprint(maps_bp)
 app.register_blueprint(table_bp)
 app.register_blueprint(availability_bp)
 app.register_blueprint(account_bp)
+app.register_blueprint(characters_bp)
 
 socketio.init_app(app)
 

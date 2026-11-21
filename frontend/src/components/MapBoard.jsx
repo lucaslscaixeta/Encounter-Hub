@@ -82,8 +82,50 @@ function setCursor(event, cursor) {
   event.target.getStage().container().style.cursor = cursor;
 }
 
+function hpColor(share) {
+  if (share > 0.5) {
+    return "#2ecc71";
+  }
+
+  return share > 0.25 ? "#f1c40f" : "#e74c3c";
+}
+
+// Barra de PV acima do token vinculado a uma ficha (temporários em azul).
+function HpBar({ character, side, cell }) {
+  if (character?.hp_max === null || character?.hp_max === undefined || character.hp_max <= 0) {
+    return null;
+  }
+
+  const width = side * 0.9;
+  const height = Math.max(4, cell * 0.1);
+  const total = Math.max(character.hp_max, character.hp_current + character.hp_temp);
+  const share = Math.min(1, character.hp_current / character.hp_max);
+
+  return (
+    <Group x={side * 0.05} y={-height - 2} listening={false}>
+      <Rect width={width} height={height} fill="#061440" cornerRadius={height / 2} />
+      <Rect
+        width={(width * character.hp_current) / total}
+        height={height}
+        fill={hpColor(share)}
+        cornerRadius={height / 2}
+      />
+      {character.hp_temp > 0 && (
+        <Rect
+          x={(width * character.hp_current) / total}
+          width={(width * character.hp_temp) / total}
+          height={height}
+          fill="#3498db"
+          cornerRadius={height / 2}
+        />
+      )}
+    </Group>
+  );
+}
+
 function TokenNode({
   token,
+  character,
   cell,
   isMine,
   movable,
@@ -92,7 +134,10 @@ function TokenNode({
   onDragEnd,
   onTransformEnd,
 }) {
-  const image = useLoadedImage(token.image_url ? assetUrl(token.image_url) : null);
+  // Token vinculado usa o nome e o retrato da ficha (se não tiver imagem própria).
+  const imageUrl = token.image_url || character?.image_url;
+  const label = character?.name || token.name;
+  const image = useLoadedImage(imageUrl ? assetUrl(imageUrl) : null);
   const side = token.size * cell;
   const radius = side * 0.45;
 
@@ -142,7 +187,7 @@ function TokenNode({
             height={side}
             align="center"
             verticalAlign="middle"
-            text={getInitials(token.name)}
+            text={getInitials(label)}
             fontSize={side * 0.32}
             fontStyle="bold"
             fill="#061440"
@@ -165,12 +210,14 @@ function TokenNode({
       />
      </Group>
 
+      <HpBar character={character} side={side} cell={cell} />
+
       <Text
         y={side - cell * 0.05}
         x={-cell / 2}
         width={side + cell}
         align="center"
-        text={token.name}
+        text={label}
         fontSize={Math.max(10, cell * 0.22)}
         fill="#ffffff"
         stroke="#061440"
@@ -184,6 +231,7 @@ function TokenNode({
 function MapBoard({
   map,
   tokens,
+  characters,
   currentUserId,
   canEditMap,
   canMoveToken,
@@ -459,6 +507,7 @@ function MapBoard({
               <TokenNode
                 key={token.id}
                 token={token}
+                character={characters?.[token.character_id]}
                 cell={cell}
                 isMine={token.owner_id === currentUserId}
                 movable={canMoveToken(token)}

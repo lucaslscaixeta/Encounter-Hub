@@ -1,5 +1,6 @@
 import React from "react";
 import { apiRequest, connectSocket, emitWithAck } from "../api.js";
+import { CharacterSheetModal } from "../components/CharacterSheet.jsx";
 import ChatPanel from "../components/ChatPanel.jsx";
 import MapBoard from "../components/MapBoard.jsx";
 import MapsPanel from "../components/MapsPanel.jsx";
@@ -33,6 +34,9 @@ function GameTablePage({ campaignId, currentUser, onBack }) {
   const [loadError, setLoadError] = React.useState("");
   const [notice, setNotice] = React.useState("");
   const [activeTab, setActiveTab] = React.useState("chat");
+  // Resumo das fichas da campanha (PV só das que o usuário pode ver).
+  const [characters, setCharacters] = React.useState([]);
+  const [openSheetId, setOpenSheetId] = React.useState(null);
   const socketRef = React.useRef(null);
 
   const loadTable = React.useCallback(async () => {
@@ -41,6 +45,7 @@ function GameTablePage({ campaignId, currentUser, onBack }) {
 
       setTable(data);
       setTokens(data.tokens);
+      setCharacters(data.characters);
       setMessages(data.messages);
       setMaps(data.maps);
       setActiveMap(data.active_map);
@@ -110,6 +115,24 @@ function GameTablePage({ campaignId, currentUser, onBack }) {
       setTokens((current) =>
         current.map((token) =>
           token.id === id ? { ...token, x, y, size } : token
+        )
+      );
+    });
+
+    // Ficha salva: atualiza nome, retrato e PV dos tokens vinculados.
+    socket.on("personagem:atualizado", (summary) => {
+      setCharacters((current) =>
+        current.some((item) => item.id === summary.id)
+          ? current.map((item) => (item.id === summary.id ? summary : item))
+          : [...current, summary]
+      );
+    });
+
+    socket.on("personagem:removido", ({ id }) => {
+      setCharacters((current) => current.filter((item) => item.id !== id));
+      setTokens((current) =>
+        current.map((token) =>
+          token.character_id === id ? { ...token, character_id: null } : token
         )
       );
     });
@@ -184,6 +207,24 @@ function GameTablePage({ campaignId, currentUser, onBack }) {
     });
 
     replaceToken(data.token);
+  }
+
+  // Coloca o personagem no mapa como token vinculado à ficha.
+  async function handlePlaceCharacter(characterId) {
+    try {
+      const data = await apiRequest(`/api/campaigns/${campaignId}/tokens`, {
+        method: "POST",
+        body: { character_id: characterId, ...findFreeCell(tokens) },
+      });
+
+      setTokens((current) =>
+        current.some((item) => item.id === data.token.id)
+          ? current
+          : [...current, data.token]
+      );
+    } catch (error) {
+      setNotice(error.message);
+    }
   }
 
   async function handleCreateToken(fields, imageFile) {
@@ -282,9 +323,17 @@ function GameTablePage({ campaignId, currentUser, onBack }) {
   const isGameMaster = table.role === "gm";
   const tabs = [
     ["chat", "Chat e dados"],
+    ["characters", "Fichas"],
     ["tokens", "Tokens"],
     ...(isGameMaster ? [["maps", "Mapas"]] : []),
   ];
+  const charactersById = Object.fromEntries(
+    characters.map((character) => [character.id, character])
+  );
+  // O mestre vê todas as fichas; o jogador, só as suas.
+  const myCharacters = characters.filter(
+    (character) => isGameMaster || character.owner_id === currentUser.id
+  );
 
   return (
     <main className="table-page">
@@ -328,6 +377,7 @@ function GameTablePage({ campaignId, currentUser, onBack }) {
           <MapBoard
             map={activeMap}
             tokens={tokens}
+            characters={charactersById}
             currentUserId={currentUser.id}
             canEditMap={isGameMaster}
             canMoveToken={(token) =>
@@ -375,6 +425,62 @@ function GameTablePage({ campaignId, currentUser, onBack }) {
             />
           )}
 
+          {activeTab === "characters" && (
+            <div className="side-section">
+              {myCharacters.length === 0 && (
+                <p className="muted">
+                  {isGameMaster
+                    ? "Nenhuma ficha nesta campanha."
+                    : "Você ainda não tem ficha nesta campanha. Crie na página da campanha."}
+                </p>
+              )}
+
+              <ul className="token-list">
+                {myCharacters.map((character) => {
+                  const onMap = tokens.some(
+                    (token) => token.character_id === character.id
+                  );
+
+                  return (
+                    <li key={character.id}>
+                      <div className="token-row">
+                        {character.image_url ? (
+                          <img className="token-dot" src={character.image_url} alt="" />
+                        ) : (
+                          <span className="token-dot" style={{ background: "#ffb82e" }} />
+                        )}
+                        <span className="token-name">
+                          {character.name}
+                          <small>
+                            {character.class_level}
+                            {character.hp_max !== null &&
+                              ` · PV ${character.hp_current}/${character.hp_max}`}
+                          </small>
+                        </span>
+                      </div>
+                      <div className="form-actions">
+                        <button
+                          className="text-button"
+                          type="button"
+                          onClick={() => setOpenSheetId(character.id)}
+                        >
+                          Abrir ficha
+                        </button>
+                        <button
+                          className="text-button"
+                          type="button"
+                          onClick={() => handlePlaceCharacter(character.id)}
+                        >
+                          {onMap ? "Colocar outro no mapa" : "Colocar no mapa"}
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+
           {activeTab === "tokens" && (
             <TokensPanel
               tokens={tokens}
@@ -400,6 +506,13 @@ function GameTablePage({ campaignId, currentUser, onBack }) {
           )}
         </aside>
       </div>
+
+      {openSheetId !== null && (
+        <CharacterSheetModal
+          characterId={openSheetId}
+          onClose={() => setOpenSheetId(null)}
+        />
+      )}
     </main>
   );
 }

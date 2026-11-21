@@ -194,3 +194,30 @@ CREATE INDEX IF NOT EXISTS rate_limit_events_key_created_at
     ON rate_limit_events (key, created_at);
 
 ALTER TABLE rate_limit_events ENABLE ROW LEVEL SECURITY;
+
+-- Fichas de personagem de D&D 5e, criadas dentro de uma campanha.
+-- O dono edita; o mestre da campanha vê e edita.
+-- data: conteúdo da ficha em JSON, validado e normalizado pelo backend
+-- (personagens.py) antes de ser salvo.
+-- image_filename: retrato na pasta "characters/" do Storage.
+CREATE TABLE IF NOT EXISTS characters (
+    id SERIAL PRIMARY KEY,
+    campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    image_filename TEXT,
+    data JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE characters ENABLE ROW LEVEL SECURITY;
+
+-- Token vinculado a uma ficha: usa nome, retrato e PV do personagem.
+ALTER TABLE tokens
+    ADD COLUMN IF NOT EXISTS character_id INTEGER
+    REFERENCES characters(id) ON DELETE SET NULL;
+
+-- Rolagem "só para o mestre": visível apenas para quem rolou e o mestre.
+ALTER TABLE messages
+    ADD COLUMN IF NOT EXISTS private BOOLEAN NOT NULL DEFAULT false;

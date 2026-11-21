@@ -4,8 +4,10 @@ from datetime import datetime
 from flask import Blueprint, g, jsonify, request
 from autenticacao import login_required
 from banco import get_connection, get_member_role
+from extensoes import campaign_room, socketio
 from mapas import delete_map_file
 from mesa_virtual import delete_token_image
+from personagens import delete_character_image
 from sessoes import SCHEDULE_FORMAT
 
 
@@ -237,6 +239,17 @@ def delete_campaign(campaign_id):
             ).fetchall()
         ]
 
+        character_images = [
+            row["image_filename"]
+            for row in connection.execute(
+                """
+                SELECT image_filename FROM characters
+                WHERE campaign_id = %s AND image_filename IS NOT NULL
+                """,
+                (campaign_id,)
+            ).fetchall()
+        ]
+
         connection.execute(
             "DELETE FROM campaigns WHERE id = %s",
             (campaign_id,)
@@ -247,6 +260,9 @@ def delete_campaign(campaign_id):
 
     for filename in token_images:
         delete_token_image(filename)
+
+    for filename in character_images:
+        delete_character_image(filename)
 
     return jsonify({"message": "Campanha excluída."}), 200
 
@@ -370,6 +386,25 @@ def remove_member(campaign_id, user_id):
             )
             """,
             (user_id, campaign_id)
+        )
+
+        # As fichas são criadas dentro da campanha: quem sai perde o acesso,
+        # então elas são excluídas (os tokens vinculados ficam sem vínculo).
+        removed_characters = connection.execute(
+            """
+            DELETE FROM characters
+            WHERE owner_id = %s AND campaign_id = %s
+            RETURNING id, image_filename
+            """,
+            (user_id, campaign_id)
+        ).fetchall()
+
+    for character in removed_characters:
+        delete_character_image(character["image_filename"])
+        socketio.emit(
+            "personagem:removido",
+            {"id": character["id"]},
+            to=campaign_room(campaign_id)
         )
 
     return jsonify({"message": "Membro removido."}), 200

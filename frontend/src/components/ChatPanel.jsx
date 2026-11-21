@@ -6,22 +6,53 @@ const QUICK_DICE = ["d4", "d6", "d8", "d10", "d12", "d20", "d100"];
 // Aceita "/r 1d20+5 Ataque" ou "/roll 2d6" no campo do chat.
 const ROLL_COMMAND = /^\/(r|roll)\s+(\S+)\s*(.*)$/i;
 
+// Em vantagem/desvantagem (kh/kl), os dados descartados aparecem riscados.
+function DiceValues({ term }) {
+  const kept = [...(term.kept || term.values)];
+
+  return (
+    <>
+      [
+      {term.values.map((value, index) => {
+        const keptIndex = kept.indexOf(value);
+        const isKept = keptIndex !== -1;
+
+        if (isKept) {
+          kept.splice(keptIndex, 1);
+        }
+
+        return (
+          <React.Fragment key={index}>
+            {index > 0 && ", "}
+            {isKept ? value : <s className="roll-dropped">{value}</s>}
+          </React.Fragment>
+        );
+      })}
+      ]
+    </>
+  );
+}
+
 function RollResult({ roll }) {
   return (
     <div className="roll-result">
       <span className="roll-total">{roll.total}</span>
       <span className="roll-detail">
         {roll.expression}:{" "}
-        {roll.terms
-          .map((term, index) => {
-            if (!term.sides) {
-              return term.term;
-            }
+        {roll.terms.map((term, index) => {
+          if (!term.sides) {
+            return <React.Fragment key={index}>{` ${term.term}`}</React.Fragment>;
+          }
 
-            const sign = term.term.startsWith("-") ? "-" : index > 0 ? "+" : "";
-            return `${sign}[${term.values.join(", ")}]`;
-          })
-          .join(" ")}
+          const sign = term.term.startsWith("-") ? " -" : index > 0 ? " +" : "";
+
+          return (
+            <React.Fragment key={index}>
+              {sign}
+              <DiceValues term={term} />
+            </React.Fragment>
+          );
+        })}
       </span>
     </div>
   );
@@ -98,7 +129,10 @@ function ChatPanel({ messages, currentUserId, onSend, onRoll }) {
             } ${message.kind === "roll" ? "roll" : ""}`}
           >
             <div className="chat-meta">
-              <strong>{message.user.name || "Usuário removido"}</strong>
+              <strong>
+                {message.user.name || "Usuário removido"}
+                {message.private && <span className="chat-private"> · só para o mestre</span>}
+              </strong>
               <time dateTime={message.created_at}>
                 {formatMessageTime(message.created_at)}
               </time>
