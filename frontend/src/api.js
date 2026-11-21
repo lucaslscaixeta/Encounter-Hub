@@ -70,7 +70,11 @@ export async function apiRequest(path, { method = "GET", body, formData } = {}) 
   }
 
   if (!response.ok) {
-    throw new Error(data.error || "Algo deu errado. Tente novamente.");
+    const error = new Error(data.error || "Algo deu errado. Tente novamente.");
+    // Algumas respostas de erro trazem dados extras (ex.: campanhas a confirmar).
+    error.status = response.status;
+    error.data = data;
+    throw error;
   }
 
   return data;
