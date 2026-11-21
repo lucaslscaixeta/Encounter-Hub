@@ -109,11 +109,89 @@ def detect_image_extension(header):
     return None
 
 
+def read_image_size(content, extension):
+    """Lê largura e altura do cabeçalho da imagem, sem bibliotecas extras.
+
+    Retorna (largura, altura) ou None se o cabeçalho não for reconhecido.
+    """
+    try:
+        if extension == ".png":
+            return (
+                int.from_bytes(content[16:20], "big"),
+                int.from_bytes(content[20:24], "big"),
+            )
+
+        if extension == ".gif":
+            return (
+                int.from_bytes(content[6:8], "little"),
+                int.from_bytes(content[8:10], "little"),
+            )
+
+        if extension == ".webp":
+            chunk = content[12:16]
+
+            if chunk == b"VP8 ":
+                return (
+                    int.from_bytes(content[26:28], "little") & 0x3FFF,
+                    int.from_bytes(content[28:30], "little") & 0x3FFF,
+                )
+
+            if chunk == b"VP8L":
+                bits = int.from_bytes(content[21:25], "little")
+                return ((bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1)
+
+            if chunk == b"VP8X":
+                return (
+                    int.from_bytes(content[24:27], "little") + 1,
+                    int.from_bytes(content[27:30], "little") + 1,
+                )
+
+            return None
+
+        if extension == ".jpg":
+            # Percorre os marcadores até o SOF, que guarda o tamanho.
+            index = 2
+
+            while index + 9 < len(content):
+                if content[index] != 0xFF:
+                    return None
+
+                marker = content[index + 1]
+
+                if marker == 0xFF:
+                    index += 1
+                    continue
+
+                length = int.from_bytes(content[index + 2:index + 4], "big")
+
+                if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+                    return (
+                        int.from_bytes(content[index + 7:index + 9], "big"),
+                        int.from_bytes(content[index + 5:index + 7], "big"),
+                    )
+
+                index += 2 + length
+
+    except (IndexError, ValueError):
+        return None
+
+    return None
+
+
 def save_uploaded_image(file, folder, max_size):
     """Valida a imagem enviada e grava no Storage com um nome aleatório.
 
     Retorna o nome do arquivo salvo. Lança ValueError com uma mensagem
     amigável se a imagem for inválida, ou StorageError se o envio falhar.
+    """
+    filename, _size = save_uploaded_image_with_size(file, folder, max_size)
+    return filename
+
+
+def save_uploaded_image_with_size(file, folder, max_size):
+    """Igual a save_uploaded_image, mas também retorna (largura, altura).
+
+    O tamanho é None quando o cabeçalho da imagem não pôde ser lido.
     """
     if file is None or not file.filename:
         raise ValueError("Selecione uma imagem.")
@@ -130,6 +208,11 @@ def save_uploaded_image(file, folder, max_size):
     if extension is None:
         raise ValueError("Envie uma imagem PNG, JPG, WEBP ou GIF.")
 
+    size = read_image_size(content, extension)
+
+    if size is not None and (size[0] <= 0 or size[1] <= 0):
+        size = None
+
     filename = f"{secrets.token_hex(16)}{extension}"
 
     ensure_bucket()
@@ -140,7 +223,7 @@ def save_uploaded_image(file, folder, max_size):
         CONTENT_TYPES[extension],
     )
 
-    return filename
+    return filename, size
 
 
 def delete_image_file(folder, filename):

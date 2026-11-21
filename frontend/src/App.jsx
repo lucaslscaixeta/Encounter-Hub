@@ -7,9 +7,10 @@ import GameTablePage from "./pages/GameTablePage.jsx";
 import SessionsPage from "./pages/SessionsPage.jsx";
 import ProfilePage from "./pages/ProfilePage.jsx";
 import CharactersPage from "./pages/CharactersPage.jsx";
+import { PrivacyPolicyModal, SiteFooter } from "./components/PrivacyPolicy.jsx";
 import "./App.css";
 
-function Dashboard({ user, onUserUpdate, onLogout, onAccountDeleted }) {
+function Dashboard({ user, onUserUpdate, onLogout, onAccountDeleted, onOpenPrivacy }) {
   const [activePage, setActivePage] = React.useState("campaigns");
   const [openCampaignId, setOpenCampaignId] = React.useState(null);
   const [tableCampaignId, setTableCampaignId] = React.useState(null);
@@ -128,12 +129,11 @@ function Dashboard({ user, onUserUpdate, onLogout, onAccountDeleted }) {
           onBack={() => goToPage("campaigns")}
           onUserUpdate={onUserUpdate}
           onAccountDeleted={onAccountDeleted}
+          onOpenPrivacy={onOpenPrivacy}
         />
       )}
 
-      <footer className="campaigns-footer">
-        © 2026 Encounter Hub. Todos os direitos reservados.
-      </footer>
+      <SiteFooter className="campaigns-footer" onOpenPrivacy={onOpenPrivacy} />
     </main>
   );
 }
@@ -163,6 +163,11 @@ function App() {
   const [resetMessage, setResetMessage] = React.useState("");
   const [isResettingPassword, setIsResettingPassword] = React.useState(false);
   const [resetCompleted, setResetCompleted] = React.useState(false);
+  const [acceptPrivacy, setAcceptPrivacy] = React.useState(false);
+  const [showPrivacy, setShowPrivacy] = React.useState(false);
+  const openPrivacy = React.useCallback(() => setShowPrivacy(true), []);
+  const closePrivacy = React.useCallback(() => setShowPrivacy(false), []);
+  const privacyModal = showPrivacy && <PrivacyPolicyModal onClose={closePrivacy} />;
 
   React.useEffect(() => {
     onUnauthorized(() => {
@@ -363,6 +368,7 @@ function handleBackToLogin() {
           name: registerName,
           email: registerEmail,
           password: registerPassword,
+          accept_privacy: acceptPrivacy,
         }),
       });
 
@@ -378,6 +384,7 @@ function handleBackToLogin() {
       setRegisterEmail("");
       setRegisterPassword("");
       setConfirmPassword("");
+      setAcceptPrivacy(false);
     } catch {
       setRegisterMessage(
         "Não foi possível conectar ao servidor. Verifique se o backend está ativo."
@@ -393,12 +400,16 @@ function handleBackToLogin() {
 
   if (user) {
   return (
-    <Dashboard
-      user={user}
-      onUserUpdate={setUser}
-      onLogout={handleLogout}
-      onAccountDeleted={handleAccountDeleted}
-    />
+    <>
+      <Dashboard
+        user={user}
+        onUserUpdate={setUser}
+        onLogout={handleLogout}
+        onAccountDeleted={handleAccountDeleted}
+        onOpenPrivacy={openPrivacy}
+      />
+      {privacyModal}
+    </>
   );
 }
   if (showResetPassword) {
@@ -499,9 +510,8 @@ function handleBackToLogin() {
         />
       </div>
 
-      <footer className="site-footer">
-        © 2026 Encounter Hub. Todos os direitos reservados.
-      </footer>
+      <SiteFooter onOpenPrivacy={openPrivacy} />
+      {privacyModal}
     </main>
   );
 }
@@ -571,9 +581,8 @@ function handleBackToLogin() {
         />
       </div>
 
-      <footer className="site-footer">
-        © 2026 Encounter Hub. Todos os direitos reservados.
-      </footer>
+      <SiteFooter onOpenPrivacy={openPrivacy} />
+      {privacyModal}
     </main>
   );
 }
@@ -656,6 +665,25 @@ function handleBackToLogin() {
                 required
               />
 
+              <label className="privacy-consent">
+                <input
+                  type="checkbox"
+                  checked={acceptPrivacy}
+                  onChange={(event) => setAcceptPrivacy(event.target.checked)}
+                  required
+                />
+                <span>
+                  Li e aceito a{" "}
+                  <button
+                    className="privacy-link"
+                    type="button"
+                    onClick={openPrivacy}
+                  >
+                    Política de Privacidade
+                  </button>
+                </span>
+              </label>
+
               {registerMessage && (
                 <p role="status" aria-live="polite">
                   {registerMessage}
@@ -695,9 +723,8 @@ function handleBackToLogin() {
           />
         </div>
 
-        <footer className="site-footer">
-          © 2026 Encounter Hub. Todos os direitos reservados.
-        </footer>
+        <SiteFooter onOpenPrivacy={openPrivacy} />
+        {privacyModal}
       </main>
     );
   }
@@ -788,9 +815,8 @@ function handleBackToLogin() {
         />
       </div>
 
-      <footer className="site-footer">
-        © 2026 Encounter Hub. Todos os direitos reservados.
-      </footer>
+      <SiteFooter onOpenPrivacy={openPrivacy} />
+      {privacyModal}
     </main>
   );
 }

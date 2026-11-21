@@ -1,9 +1,12 @@
+import json
+from datetime import date, datetime
+
 from flask import Blueprint, g, jsonify, request
 from werkzeug.security import check_password_hash
 from autenticacao import login_required
 from banco import get_connection
 from extensoes import socketio
-from imagens import delete_image_file
+from imagens import delete_image_file, public_url
 from mapas import delete_map_file
 from mesa_virtual import delete_token_image
 from personagens import delete_character_image
@@ -160,3 +163,139 @@ def delete_account():
     )
 
     return jsonify({"message": "Sua conta foi excluída."}), 200
+
+
+
+def to_json(value):
+    #Converte as datas do Postgres para texto ISO (com fuso horário).
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+
+    if isinstance(value, dict):
+        return {key: to_json(item) for key, item in value.items()}
+
+    if isinstance(value, list):
+        return [to_json(item) for item in value]
+
+    return value
+
+
+@account_bp.route("/api/me/export", methods=["GET"])
+@login_required
+def export_my_data():
+    """Devolve todos os dados pessoais do usuário em JSON (LGPD, acesso).
+
+    Não inclui o hash da senha nem os tokens de acesso, que são segredos.
+    """
+    user_id = g.user["id"]
+
+    with get_connection() as connection:
+        user = connection.execute(
+            """
+            SELECT id, name, email, email_verified, avatar_filename,
+                   created_at, privacy_accepted_at
+            FROM users WHERE id = %s
+            """,
+            (user_id,)
+        ).fetchone()
+
+        campaigns = connection.execute(
+            """
+            SELECT campaigns.id, campaigns.name, campaigns.description,
+                   campaign_members.role, campaign_members.joined_at
+            FROM campaign_members
+            JOIN campaigns ON campaigns.id = campaign_members.campaign_id
+            WHERE campaign_members.user_id = %s
+            ORDER BY campaign_members.joined_at
+            """,
+            (user_id,)
+        ).fetchall()
+
+        attendance = connection.execute(
+            """
+            SELECT game_sessions.id AS session_id, game_sessions.title,
+                   game_sessions.scheduled_at, game_sessions.campaign_id,
+                   session_attendance.status, session_attendance.updated_at
+            FROM session_attendance
+            JOIN game_sessions
+                ON game_sessions.id = session_attendance.session_id
+            WHERE session_attendance.user_id = %s
+            ORDER BY game_sessions.scheduled_at
+            """,
+            (user_id,)
+        ).fetchall()
+
+        availability = connection.execute(
+            """
+            SELECT availability_polls.id AS poll_id, availability_polls.title,
+                   availability_polls.campaign_id, availability_slots.slot
+            FROM availability_slots
+            JOIN availability_polls
+                ON availability_polls.id = availability_slots.poll_id
+            WHERE availability_slots.user_id = %s
+            ORDER BY availability_polls.id, availability_slots.slot
+            """,
+            (user_id,)
+        ).fetchall()
+
+        characters = connection.execute(
+            """
+            SELECT id, campaign_id, name, data, created_at, updated_at
+            FROM characters WHERE owner_id = %s ORDER BY id
+            """,
+            (user_id,)
+        ).fetchall()
+
+        tokens = connection.execute(
+            """
+            SELECT id, campaign_id, name, color, x, y, size, character_id,
+                   created_at
+            FROM tokens WHERE owner_id = %s ORDER BY id
+            """,
+            (user_id,)
+        ).fetchall()
+
+        messages = connection.execute(
+            """
+            SELECT id, campaign_id, kind, content, roll_data, private,
+                   created_at
+            FROM messages WHERE user_id = %s ORDER BY created_at
+            """,
+            (user_id,)
+        ).fetchall()
+
+        login_sessions = connection.execute(
+            """
+            SELECT created_at, expires_at FROM auth_tokens
+            WHERE user_id = %s ORDER BY created_at
+            """,
+            (user_id,)
+        ).fetchall()
+
+    profile = dict(user)
+    profile["email_verified"] = bool(profile["email_verified"])
+    profile["avatar_url"] = public_url(
+        "avatars", profile.pop("avatar_filename")
+    )
+
+    message_list = []
+
+    for row in messages:
+        message = dict(row)
+        roll_data = message.pop("roll_data")
+        message["roll"] = json.loads(roll_data) if roll_data else None
+        message_list.append(message)
+
+    export = {
+        "exported_at": datetime.now().astimezone(),
+        "profile": profile,
+        "campaigns": [dict(row) for row in campaigns],
+        "session_attendance": [dict(row) for row in attendance],
+        "availability": [dict(row) for row in availability],
+        "characters": [dict(row) for row in characters],
+        "tokens": [dict(row) for row in tokens],
+        "messages": message_list,
+        "login_sessions": [dict(row) for row in login_sessions],
+    }
+
+    return jsonify(to_json(export)), 200

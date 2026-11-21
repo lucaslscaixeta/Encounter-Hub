@@ -23,3 +23,6 @@ backend/*.db
 backend/*.db-journal
 # Mapas enviados
 backend/uploads/
+
+# Testes
+.pytest_cache/

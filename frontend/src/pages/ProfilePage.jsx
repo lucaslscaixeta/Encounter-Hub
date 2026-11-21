@@ -1,7 +1,65 @@
 
 import React from "react";
 import { apiRequest } from "../api.js";
+import { downloadText } from "../ficha5e.js";
 import maisIcon from "../assets/mais.png";
+
+// Acesso aos dados (LGPD): baixa tudo o que o sistema guarda sobre o
+// usuário em JSON e abre a Política de Privacidade.
+function MyDataSection({ onOpenPrivacy }) {
+  const [message, setMessage] = React.useState("");
+  const [isExporting, setIsExporting] = React.useState(false);
+
+  async function handleExport() {
+    setMessage("");
+    setIsExporting(true);
+
+    try {
+      const data = await apiRequest("/api/me/export");
+      const day = new Date().toISOString().slice(0, 10);
+
+      downloadText(
+        `encounter-hub-meus-dados-${day}.json`,
+        JSON.stringify(data, null, 2)
+      );
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setIsExporting(false);
+    }
+  }
+
+  return (
+    <div className="profile-data-zone">
+      <h2>Seus dados</h2>
+      <p>
+        Baixe uma cópia de tudo o que o Encounter Hub guarda sobre você:
+        perfil, campanhas, presenças, disponibilidade, fichas, tokens e
+        mensagens.
+      </p>
+
+      {message && (
+        <p className="profile-delete-message" role="alert">
+          {message}
+        </p>
+      )}
+
+      <div className="profile-actions">
+        <button
+          className="profile-save-button"
+          type="button"
+          onClick={handleExport}
+          disabled={isExporting}
+        >
+          {isExporting ? "Preparando..." : "Baixar meus dados"}
+        </button>
+        <button className="privacy-link" type="button" onClick={onOpenPrivacy}>
+          Política de Privacidade
+        </button>
+      </div>
+    </div>
+  );
+}
 
 // Exclusão da conta (LGPD). Pede a senha; se o usuário for mestre de
 // campanhas, mostra quais serão apagadas e exige uma confirmação a mais.
@@ -135,7 +193,7 @@ function DeleteAccountSection({ onAccountDeleted }) {
   );
 }
 
-export default function ProfilePage({ user, onBack, onUserUpdate, onAccountDeleted }) {
+export default function ProfilePage({ user, onBack, onUserUpdate, onAccountDeleted, onOpenPrivacy }) {
   const [name, setName] = React.useState(user?.name || "");
   const [photoPreview, setPhotoPreview] = React.useState(null);
   const [selectedPhoto, setSelectedPhoto] = React.useState(null);
@@ -336,6 +394,8 @@ export default function ProfilePage({ user, onBack, onUserUpdate, onAccountDelet
             </button>
           </div>
         </form>
+
+        <MyDataSection onOpenPrivacy={onOpenPrivacy} />
 
         <DeleteAccountSection onAccountDeleted={onAccountDeleted} />
 
