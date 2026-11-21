@@ -6,7 +6,7 @@ from imagens import (
     StorageError,
     delete_image_file,
     public_url,
-    save_uploaded_image,
+    save_uploaded_image_with_size,
 )
 
 
@@ -23,6 +23,10 @@ MAX_MAP_DIMENSION = 60000
 
 # Limite da grade em quadrados (também limita a posição dos tokens).
 MAX_GRID_CELLS = 200
+
+# Área da mesa sem mapa ativo (igual à do frontend, MapBoard.jsx).
+DEFAULT_GRID_COLUMNS = 30
+DEFAULT_GRID_ROWS = 20
 
 
 def serialize_map(row):
@@ -95,6 +99,43 @@ def get_active_map(connection, campaign_id):
     return serialize_map(row)
 
 
+def active_grid(connection, campaign_id):
+    """Tamanho da grade da mesa em quadrados: (colunas, linhas).
+
+    Segue a mesma regra do frontend (MapBoard.jsx): a grade definida pelo
+    mestre; sem ela, a que cobre a imagem do mapa; sem mapa, a área padrão.
+    Retorna None quando o tamanho da imagem é desconhecido (mapas enviados
+    antes de o servidor guardar esse tamanho).
+    """
+    row = connection.execute(
+        """
+        SELECT maps.* FROM campaigns
+        JOIN maps ON maps.id = campaigns.active_map_id
+        WHERE campaigns.id = %s
+        """,
+        (campaign_id,)
+    ).fetchone()
+
+    if row is None:
+        return DEFAULT_GRID_COLUMNS, DEFAULT_GRID_ROWS
+
+    if row["grid_columns"] and row["grid_rows"]:
+        return row["grid_columns"], row["grid_rows"]
+
+    width = row["width"] or row["image_width"]
+    height = row["height"] or row["image_height"]
+
+    if not width or not height:
+        return None
+
+    cell = row["grid_size"]
+    # Divisão arredondada para cima, como o Math.ceil do frontend.
+    columns = -(-max(cell, row["x"] + width) // cell)
+    rows = -(-max(cell, row["y"] + height) // cell)
+
+    return columns, rows
+
+
 def broadcast_active_map(connection, campaign_id):
     socketio.emit(
         "mesa:mapa",
@@ -142,7 +183,9 @@ def upload_map(campaign_id):
             }), 403
 
     try:
-        filename = save_uploaded_image(file, MAPS_FOLDER, MAX_MAP_SIZE)
+        filename, image_size = save_uploaded_image_with_size(
+            file, MAPS_FOLDER, MAX_MAP_SIZE
+        )
     except ValueError as error:
         return jsonify({"error": str(error)}), 400
     except StorageError as error:
@@ -156,11 +199,17 @@ def upload_map(campaign_id):
     with get_connection() as connection:
         row = connection.execute(
             """
-            INSERT INTO maps (campaign_id, name, filename, grid_size)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO maps (
+                campaign_id, name, filename, grid_size,
+                image_width, image_height
+            )
+            VALUES (%s, %s, %s, %s, %s, %s)
             RETURNING *
             """,
-            (campaign_id, name, filename, grid_size)
+            (
+                campaign_id, name, filename, grid_size,
+                *(image_size or (None, None))
+            )
         ).fetchone()
 
     return jsonify({

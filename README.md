@@ -49,7 +49,41 @@ npm run dev
   o mestre clica no mapa e arrasta as alças das bordas.
 - **Tokens**: podem ter imagem (até 5 MB, exibida em círculo) e mudar de tamanho
   clicando no token e arrastando os cantos (de 1×1 até 10×10 quadrados). O mestre
-  edita todos; o jogador, só os seus.
+  edita todos; o jogador, só os seus. O servidor prende os tokens dentro da grade
+  do mapa ativo (sem mapa, 30 × 20 quadrados).
+- **Privacidade (LGPD)**: o cadastro exige o aceite da Política de Privacidade
+  (link no rodapé de todas as telas). Em Perfil, o usuário baixa todos os seus
+  dados em JSON ("Baixar meus dados") ou exclui a conta.
+
+## Testes
+
+Os testes ficam em `backend/tests` e usam pytest:
+
+```bash
+cd backend
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+Eles usam o banco do `DATABASE_URL`, mas cada teste cria um schema temporário
+(`teste_xxxxxxxx`) que é apagado no fim, mesmo quando o teste falha; os dados
+reais não são tocados. Use a connection string do Session pooler (porta 5432).
+Nenhum e-mail é enviado e nada vai para o Storage: os dois serviços são
+substituídos por versões falsas. Sem `DATABASE_URL`, os testes que usam o banco
+são pulados.
+
+## Decisões de projeto
+
+- **Concorrência na mesa**: o servidor é a autoridade sobre o estado. Se duas
+  pessoas movem o mesmo token ao mesmo tempo, vale a última posição gravada, e
+  todos recebem `token:movido` com essa posição final.
+- **Imagens públicas**: o bucket do Supabase Storage é público. Os nomes dos
+  arquivos são aleatórios (128 bits), então só quem recebe o link da mesa vê as
+  imagens, mas quem tem o link consegue abri-lo. Por isso não usamos links
+  temporários; a Política de Privacidade avisa o usuário disso.
+- **Propostas para o futuro** (ainda não implementadas): prefixo `/api/v1` quando
+  a API mudar de forma incompatível, e uma fila de mensagens (ex.: Redis) para o
+  Socket.IO se o backend rodar em mais de uma instância.
 
 ## Estrutura do backend
 
@@ -59,9 +93,16 @@ npm run dev
 | `banco.py` | Conexão com o Postgres do Supabase (pool de conexões) |
 | `schema.sql` | Criação das tabelas, executada quando o backend sobe |
 | `imagens.py` | Validação e envio de imagens para o Supabase Storage |
-| `autenticacao.py` | Cadastro, confirmação de e-mail, login com token |
+| `autenticacao.py` | Cadastro, confirmação de e-mail, login com token, perfil e senha |
+| `conta.py` | Exportação dos dados e exclusão da conta (LGPD) |
+| `limites.py` | Limite de tentativas (login, cadastro, senha) |
+| `manutencao.py` | Limpeza automática de dados vencidos |
 | `campanhas.py` | Campanhas, convites e participantes |
 | `sessoes.py` | Agendamento de sessões e confirmação de presença |
+| `disponibilidade.py` | Enquetes de disponibilidade para marcar sessões |
+| `avisos.py` | Avisos por e-mail de ausências e de sessões canceladas |
 | `mapas.py` | Upload e escolha do mapa da mesa |
 | `mesa_virtual.py` | Estado da mesa, tokens, chat e dados em tempo real |
+| `personagens.py` | Fichas de personagem de D&D 5e |
 | `dados.py` | Rolagem de dados (feita no servidor) |
+| `tests/` | Testes automatizados (pytest) |

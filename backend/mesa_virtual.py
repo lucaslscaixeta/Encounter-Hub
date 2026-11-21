@@ -14,7 +14,7 @@ from imagens import (
     public_url,
     save_uploaded_image,
 )
-from mapas import get_active_map, serialize_map
+from mapas import active_grid, get_active_map, serialize_map
 from personagens import summary_for
 
 
@@ -104,6 +104,23 @@ def read_position(value):
         return None
 
     return value if 0 <= value < MAX_GRID_POSITION else None
+
+
+def clamp_to_grid(connection, campaign_id, x, y):
+    """Prende a posição do token dentro da grade do mapa ativo.
+
+    Em vez de recusar, puxa o token para a borda, como o frontend faz ao
+    soltar um token fora da grade.
+    """
+    grid = active_grid(connection, campaign_id)
+
+    if grid is None:
+        return x, y
+
+    columns = min(grid[0], MAX_GRID_POSITION)
+    rows = min(grid[1], MAX_GRID_POSITION)
+
+    return min(x, columns - 1), min(y, rows - 1)
 
 
 def save_message(
@@ -350,6 +367,8 @@ def create_token(campaign_id):
             connection, campaign_id, owner_id
         ) is None:
             return jsonify({"error": "O dono do token não está na campanha."}), 400
+
+        x, y = clamp_to_grid(connection, campaign_id, x, y)
 
         row = connection.execute(
             """
@@ -623,7 +642,10 @@ def handle_move_token(data):
     if role != "gm" and row["owner_id"] != user["id"]:
         return {"error": "Você só pode mover os seus tokens."}
 
+    # Concorrência: o servidor é a autoridade e vale a última posição
+    # gravada; todos recebem "token:movido" com a posição final.
     with get_connection() as connection:
+        x, y = clamp_to_grid(connection, row["campaign_id"], x, y)
         connection.execute(
             "UPDATE tokens SET x = %s, y = %s, size = %s WHERE id = %s",
             (x, y, size, row["id"])

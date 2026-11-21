@@ -221,3 +221,14 @@ ALTER TABLE tokens
 -- Rolagem "só para o mestre": visível apenas para quem rolou e o mestre.
 ALTER TABLE messages
     ADD COLUMN IF NOT EXISTS private BOOLEAN NOT NULL DEFAULT false;
+
+-- Data em que o usuário aceitou a Política de Privacidade no cadastro
+-- (nula para contas criadas antes do aceite existir).
+ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS privacy_accepted_at TIMESTAMPTZ;
+
+-- Tamanho original da imagem do mapa, em pixels, lido no upload. Serve
+-- para o servidor calcular a grade quando ela acompanha a imagem.
+ALTER TABLE maps
+    ADD COLUMN IF NOT EXISTS image_width INTEGER,
+    ADD COLUMN IF NOT EXISTS image_height INTEGER;

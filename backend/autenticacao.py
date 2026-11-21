@@ -140,6 +140,12 @@ def register():
     if len(password) > 1024:
         return jsonify({"error": "A senha é muito longa."}), 400
 
+    # LGPD: o cadastro só é feito com o aceite da Política de Privacidade.
+    if data.get("accept_privacy") is not True:
+        return jsonify({
+            "error": "Aceite a Política de Privacidade para criar a conta."
+        }), 400
+
     # Cada cadastro envia um e-mail; limita para evitar uso como spam.
     register_key = f"cadastro-ip:{limites.client_ip()}"
     blocked = limites.check_limits((register_key, limites.REGISTER_PER_IP))
@@ -167,9 +173,10 @@ def register():
                     password_hash,
                     email_verified,
                     verification_token_hash,
-                    verification_expires_at
+                    verification_expires_at,
+                    privacy_accepted_at
                 )
-                VALUES (%s, %s, %s, 0, %s, %s)
+                VALUES (%s, %s, %s, 0, %s, %s, now())
                 RETURNING id
                 """,
                 (name, email, password_hash, token_hash, expires_at)
