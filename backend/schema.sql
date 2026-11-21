@@ -180,3 +180,17 @@ CREATE TABLE IF NOT EXISTS availability_slots (
 
 ALTER TABLE availability_polls ENABLE ROW LEVEL SECURITY;
 ALTER TABLE availability_slots ENABLE ROW LEVEL SECURITY;
+
+-- Registro de tentativas para limitar abusos (login, cadastro, senha).
+-- key identifica o que é limitado, ex.: "login-ip:203.0.113.5".
+-- Os registros antigos são apagados pela limpeza automática.
+CREATE TABLE IF NOT EXISTS rate_limit_events (
+    id BIGSERIAL PRIMARY KEY,
+    key TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS rate_limit_events_key_created_at
+    ON rate_limit_events (key, created_at);
+
+ALTER TABLE rate_limit_events ENABLE ROW LEVEL SECURITY;

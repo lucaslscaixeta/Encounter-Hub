@@ -2161,3 +2161,90 @@ img.token-dot {
 .best-slots strong {
   text-transform: capitalize;
 }
+
+/* ===== EXCLUSÃO DE CONTA ===== */
+
+.profile-danger-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 48px;
+  padding: 22px;
+  border: 1px solid rgba(224, 90, 90, 0.5);
+  border-radius: 18px;
+  background: rgba(224, 90, 90, 0.08);
+}
+
+.profile-danger-zone h2 {
+  margin: 0;
+  color: #ffb4b4;
+  font-size: 20px;
+}
+
+.profile-danger-zone p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.profile-danger-zone .profile-actions {
+  flex-wrap: wrap;
+  margin-top: 0;
+}
+
+.profile-delete-button,
+.profile-cancel-button {
+  align-self: flex-start;
+  min-height: 46px;
+  padding: 0 22px;
+  border-radius: 35px;
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.profile-delete-button {
+  border: 2px solid #e05a5a;
+  background: #e05a5a;
+  color: #fff;
+}
+
+.profile-delete-button:hover:not(:disabled) {
+  background: #c94545;
+}
+
+.profile-delete-button:disabled,
+.profile-cancel-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.profile-cancel-button {
+  border: 2px solid var(--muted);
+  background: transparent;
+  color: var(--white);
+}
+
+.profile-delete-campaigns {
+  padding: 14px;
+  border-radius: 12px;
+  background: rgba(224, 90, 90, 0.15);
+}
+
+.profile-delete-campaigns ul {
+  margin: 8px 0 12px;
+  padding-left: 20px;
+  color: var(--white);
+}
+
+.profile-delete-confirm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--white);
+  font-weight: 700;
+}
+
+.profile-delete-message {
+  color: #ffb4b4 !important;
+  font-weight: 700;
+}

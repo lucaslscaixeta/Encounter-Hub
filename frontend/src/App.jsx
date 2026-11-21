@@ -68,7 +68,7 @@ function CharactersPage() {
   );
 }
 
-function Dashboard({ user, onUserUpdate, onLogout }) {
+function Dashboard({ user, onUserUpdate, onLogout, onAccountDeleted }) {
   const [activePage, setActivePage] = React.useState("campaigns");
   const [openCampaignId, setOpenCampaignId] = React.useState(null);
   const [tableCampaignId, setTableCampaignId] = React.useState(null);
@@ -184,6 +184,7 @@ function Dashboard({ user, onUserUpdate, onLogout }) {
           user={user}
           onBack={() => goToPage("campaigns")}
           onUserUpdate={onUserUpdate}
+          onAccountDeleted={onAccountDeleted}
         />
       )}
 
@@ -246,6 +247,13 @@ function App() {
 
     setToken("");
     setUser(null);
+  }
+
+  // A conta já não existe no servidor; só encerra a sessão local.
+  function handleAccountDeleted() {
+    setToken("");
+    setUser(null);
+    setLoginMessage("Sua conta foi excluída.");
   }
 
 
@@ -446,6 +454,7 @@ function handleBackToLogin() {
       user={user}
       onUserUpdate={setUser}
       onLogout={handleLogout}
+      onAccountDeleted={handleAccountDeleted}
     />
   );
 }

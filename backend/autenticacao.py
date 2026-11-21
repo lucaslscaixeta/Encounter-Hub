@@ -1,4 +1,5 @@
 import hashlib
+import os
 import secrets
 
 from datetime import datetime, timedelta, timezone
@@ -15,11 +16,17 @@ from imagens import (
     public_url,
     StorageError,
 )
+import limites
 
 
 auth_bp = Blueprint("auth", __name__)
 
 TOKEN_DURATION = timedelta(days=7)
+
+# Endereços usados nos links enviados por e-mail. Em produção, configure
+# BACKEND_URL e FRONTEND_URL no .env com os endereços públicos.
+BACKEND_URL = (os.getenv("BACKEND_URL") or "http://localhost:5000").rstrip("/")
+FRONTEND_URL = (os.getenv("FRONTEND_URL") or "http://localhost:5173").rstrip("/")
 
 
 def hash_token(token):
@@ -133,6 +140,15 @@ def register():
     if len(password) > 1024:
         return jsonify({"error": "A senha é muito longa."}), 400
 
+    # Cada cadastro envia um e-mail; limita para evitar uso como spam.
+    register_key = f"cadastro-ip:{limites.client_ip()}"
+    blocked = limites.check_limits((register_key, limites.REGISTER_PER_IP))
+
+    if blocked:
+        return blocked
+
+    limites.record(register_key)
+
     password_hash = generate_password_hash(password)
 
     token = secrets.token_urlsafe(32)
@@ -166,7 +182,7 @@ def register():
         }), 409
 
     verification_url = (
-        f"http://localhost:5000/api/verify-email?"
+        f"{BACKEND_URL}/api/verify-email?"
         f"{urlencode({'token': token})}"
     )
 
@@ -296,6 +312,20 @@ def login():
             "error": "Preencha o e-mail e a senha."
         }), 400
 
+    # Só tentativas erradas contam. A chave da conta inclui o IP para que
+    # alguém de fora não consiga bloquear o login do dono da conta.
+    ip = limites.client_ip()
+    account_key = f"login-conta:{email}|{ip}"
+    ip_key = f"login-ip:{ip}"
+
+    blocked = limites.check_limits(
+        (account_key, limites.LOGIN_FAILURES_PER_ACCOUNT),
+        (ip_key, limites.LOGIN_FAILURES_PER_IP),
+    )
+
+    if blocked:
+        return blocked
+
     with get_connection() as connection:
         user = connection.execute(
             """
@@ -310,9 +340,13 @@ def login():
     if user is None or not check_password_hash(
         user["password_hash"], password
     ):
+        limites.record(account_key, ip_key)
+
         return jsonify({
             "error": "E-mail ou senha incorretos."
         }), 401
+
+    limites.clear(account_key)
 
     if not user["email_verified"]:
         return jsonify({
@@ -463,6 +497,18 @@ def forgot_password():
             "error": "Informe um e-mail válido."
         }), 400
 
+    ip_key = f"recuperacao-ip:{limites.client_ip()}"
+    account_key = f"recuperacao-conta:{email}"
+    blocked = limites.check_limits(
+        (ip_key, limites.FORGOT_PASSWORD_PER_IP),
+        (account_key, limites.FORGOT_PASSWORD_PER_ACCOUNT),
+    )
+
+    if blocked:
+        return blocked
+
+    limites.record(ip_key, account_key)
+
     # A resposta é a mesma, exista ou não uma conta com esse e-mail.
     mensagem = (
         "Se houver uma conta cadastrada com esse e-mail, "
@@ -502,8 +548,7 @@ def forgot_password():
             (user["id"], token_hash, expires_at)
         )
 
-    frontend_url = "http://localhost:5173"
-    reset_url = f"{frontend_url}/?reset_token={token}"
+    reset_url = f"{FRONTEND_URL}/?{urlencode({'reset_token': token})}"
 
     conteudo = (
         f"Olá, {user['name']}!\n\n"
@@ -555,6 +600,15 @@ def reset_password():
         }), 400
 
     token = token.strip()
+
+    # Evita tentativas em massa de adivinhar links de recuperação.
+    reset_key = f"redefinicao-ip:{limites.client_ip()}"
+    blocked = limites.check_limits((reset_key, limites.RESET_PASSWORD_PER_IP))
+
+    if blocked:
+        return blocked
+
+    limites.record(reset_key)
 
     if not token:
         return jsonify({
