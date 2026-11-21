@@ -1,6 +1,7 @@
 import React from "react";
 import { apiRequest } from "../api.js";
 import AvailabilityPanel from "../components/AvailabilityPanel.jsx";
+import CampaignCharacters from "../components/CampaignCharacters.jsx";
 import SessionCard from "../components/SessionCard.jsx";
 import SessionForm from "../components/SessionForm.jsx";
 
@@ -185,6 +186,8 @@ function CampaignDetailPage({ campaignId, currentUser, onBack, onOpenTable }) {
             isGameMaster={isGameMaster}
             onSessionCreated={loadData}
           />
+
+          <CampaignCharacters campaignId={campaign.id} isGameMaster={isGameMaster} />
 
           {pastSessions.length > 0 && (
             <>

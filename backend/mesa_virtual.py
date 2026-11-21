@@ -7,7 +7,7 @@ from flask_socketio import ConnectionRefusedError, join_room, leave_room
 from autenticacao import get_user_by_token, login_required
 from banco import get_connection, get_member_role
 from dados import roll_expression
-from extensoes import campaign_room, socketio
+from extensoes import campaign_room, emit_to_users, socketio, user_room
 from imagens import (
     StorageError,
     delete_image_file,
@@ -15,6 +15,7 @@ from imagens import (
     save_uploaded_image,
 )
 from mapas import get_active_map, serialize_map
+from personagens import summary_for
 
 
 table_bp = Blueprint("table", __name__)
@@ -44,7 +45,8 @@ def serialize_token(row):
         "x": row["x"],
         "y": row["y"],
         "size": row["size"],
-        "image_url": public_url(TOKENS_FOLDER, row["image_filename"])
+        "image_url": public_url(TOKENS_FOLDER, row["image_filename"]),
+        "character_id": row["character_id"]
     }
 
 
@@ -91,6 +93,7 @@ def serialize_message(row):
         "content": row["content"],
         "roll": json.loads(row["roll_data"]) if row["roll_data"] else None,
         "user": {"id": row["user_id"], "name": row["user_name"]},
+        "private": row["private"],
         # TIMESTAMPTZ: o isoformat já inclui o fuso horário.
         "created_at": row["created_at"].isoformat()
     }
@@ -103,11 +106,15 @@ def read_position(value):
     return value if 0 <= value < MAX_GRID_POSITION else None
 
 
-def save_message(connection, campaign_id, user_id, kind, content, roll=None):
+def save_message(
+    connection, campaign_id, user_id, kind, content, roll=None, private=False
+):
     message_id = connection.execute(
         """
-        INSERT INTO messages (campaign_id, user_id, kind, content, roll_data)
-        VALUES (%s, %s, %s, %s, %s)
+        INSERT INTO messages (
+            campaign_id, user_id, kind, content, roll_data, private
+        )
+        VALUES (%s, %s, %s, %s, %s, %s)
         RETURNING id
         """,
         (
@@ -115,7 +122,8 @@ def save_message(connection, campaign_id, user_id, kind, content, roll=None):
             user_id,
             kind,
             content,
-            json.dumps(roll) if roll else None
+            json.dumps(roll) if roll else None,
+            private
         )
     ).fetchone()["id"]
 
@@ -130,6 +138,43 @@ def save_message(connection, campaign_id, user_id, kind, content, roll=None):
     ).fetchone()
 
     return serialize_message(row)
+
+
+def publish_message(connection, campaign_id, message):
+    #Mensagem privada (rolagem "só para o mestre") vai só ao autor e ao mestre.
+    if not message["private"]:
+        socketio.emit("chat:mensagem", message, to=campaign_room(campaign_id))
+        return
+
+    gm_id = connection.execute(
+        "SELECT owner_id FROM campaigns WHERE id = %s",
+        (campaign_id,)
+    ).fetchone()["owner_id"]
+
+    emit_to_users(
+        "chat:mensagem",
+        message,
+        campaign_id,
+        [message["user"]["id"], gm_id]
+    )
+
+
+def roll_and_save(connection, campaign_id, user_id, expression, label, private):
+    #Rola no servidor e grava no chat; lança ValueError se a expressão for inválida.
+    roll = roll_expression(expression)
+    label = label.strip()[:80] if isinstance(label, str) else ""
+
+    message = save_message(
+        connection,
+        campaign_id,
+        user_id,
+        "roll",
+        label or roll["expression"],
+        roll,
+        private
+    )
+    publish_message(connection, campaign_id, message)
+    return message
 
 
 def online_users(campaign_id):
@@ -187,12 +232,18 @@ def get_table(campaign_id):
                 FROM messages
                 LEFT JOIN users ON users.id = messages.user_id
                 WHERE messages.campaign_id = %s
+                  AND (NOT messages.private OR messages.user_id = %s OR %s)
                 ORDER BY messages.id DESC
                 LIMIT %s
             ) AS recent
             ORDER BY id
             """,
-            (campaign_id, MESSAGE_HISTORY)
+            (campaign_id, g.user["id"], role == "gm", MESSAGE_HISTORY)
+        ).fetchall()
+
+        characters = connection.execute(
+            "SELECT * FROM characters WHERE campaign_id = %s ORDER BY name",
+            (campaign_id,)
         ).fetchall()
 
         members = connection.execute(
@@ -215,7 +266,11 @@ def get_table(campaign_id):
         "maps": [serialize_map(row) for row in maps],
         "tokens": [serialize_token(row) for row in tokens],
         "messages": [serialize_message(row) for row in messages],
-        "members": [dict(row) for row in members]
+        "members": [dict(row) for row in members],
+        # Resumo das fichas, para os tokens vinculados (PV só para quem pode).
+        "characters": [
+            summary_for(row, g.user["id"], role) for row in characters
+        ]
     }), 200
 
 
@@ -234,6 +289,32 @@ def create_token(campaign_id):
     y = read_position(data.get("y", 0))
     size = read_token_size(data.get("size", 1))
     owner_id = data.get("owner_id", g.user["id"])
+    character_id = data.get("character_id")
+
+    if character_id is not None and not is_id(character_id):
+        return jsonify({"error": "Personagem não encontrado."}), 404
+
+    character = None
+
+    if character_id is not None:
+        with get_connection() as connection:
+            character = connection.execute(
+                "SELECT * FROM characters WHERE id = %s AND campaign_id = %s",
+                (character_id, campaign_id)
+            ).fetchone()
+            role = get_member_role(connection, campaign_id, g.user["id"])
+
+        # Só o dono da ficha ou o mestre colocam o personagem no mapa.
+        if character is None or (
+            role != "gm" and character["owner_id"] != g.user["id"]
+        ):
+            return jsonify({"error": "Personagem não encontrado."}), 404
+
+        # O token é do dono da ficha e, sem nome, usa o do personagem.
+        owner_id = character["owner_id"]
+
+        if not isinstance(name, str) or not name.strip():
+            name = character["name"][:40]
 
     if not isinstance(name, str) or not name.strip():
         return jsonify({"error": "Informe o nome do token."}), 400
@@ -263,7 +344,7 @@ def create_token(campaign_id):
 
         # Jogadores só criam tokens para si; o mestre escolhe o dono
         # (ou deixa sem dono, para monstros e NPCs).
-        if role != "gm":
+        if character is None and role != "gm":
             owner_id = g.user["id"]
         elif owner_id is not None and get_member_role(
             connection, campaign_id, owner_id
@@ -273,12 +354,15 @@ def create_token(campaign_id):
         row = connection.execute(
             """
             INSERT INTO tokens (
-                campaign_id, owner_id, name, color, x, y, size
+                campaign_id, owner_id, name, color, x, y, size, character_id
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING *
             """,
-            (campaign_id, owner_id, name.strip(), color, x, y, size)
+            (
+                campaign_id, owner_id, name.strip(), color, x, y, size,
+                character_id
+            )
         ).fetchone()
 
     token = serialize_token(row)
@@ -380,6 +464,39 @@ def delete_token(token_id):
 
 
 
+@table_bp.route("/api/campaigns/<int:campaign_id>/rolls", methods=["POST"])
+@login_required
+def roll_dice(campaign_id):
+    """Rola dados no chat da campanha (usado pela ficha de personagem).
+
+    Funciona mesmo com a ficha aberta fora da mesa; quem está na mesa
+    recebe a rolagem em tempo real. "private" mostra só para o mestre.
+    """
+    data = request.get_json(silent=True)
+
+    if not isinstance(data, dict):
+        return jsonify({"error": "Envie os dados em formato JSON."}), 400
+
+    with get_connection() as connection:
+        if get_member_role(connection, campaign_id, g.user["id"]) is None:
+            return jsonify({"error": "Campanha não encontrada."}), 404
+
+        try:
+            message = roll_and_save(
+                connection,
+                campaign_id,
+                g.user["id"],
+                data.get("expression"),
+                data.get("label", ""),
+                data.get("private") is True
+            )
+        except ValueError as error:
+            return jsonify({"error": str(error)}), 400
+
+    return jsonify({"message": message}), 201
+
+
+
 # ===== EVENTOS EM TEMPO REAL =====
 
 def current_user():
@@ -440,6 +557,7 @@ def handle_join_table(data):
         return {"error": role}
 
     join_room(campaign_room(campaign_id))
+    join_room(user_room(campaign_id, user["id"]))
 
     with presence_lock:
         presence.setdefault(campaign_id, {})[request.sid] = user
@@ -453,6 +571,11 @@ def handle_leave_table(data):
     campaign_id = data.get("campaign_id") if isinstance(data, dict) else None
 
     leave_room(campaign_room(campaign_id))
+
+    user = current_user()
+
+    if user is not None:
+        leave_room(user_room(campaign_id, user["id"]))
 
     with presence_lock:
         presence.get(campaign_id, {}).pop(request.sid, None)
@@ -550,28 +673,22 @@ def handle_dice_roll(data):
         return {"error": "Dados inválidos."}
 
     campaign_id = data.get("campaign_id")
-    label = data.get("label", "")
     user, role = require_member(campaign_id)
 
     if user is None:
         return {"error": role}
 
     try:
-        roll = roll_expression(data.get("expression"))
+        with get_connection() as connection:
+            roll_and_save(
+                connection,
+                campaign_id,
+                user["id"],
+                data.get("expression"),
+                data.get("label", ""),
+                data.get("private") is True
+            )
     except ValueError as error:
         return {"error": str(error)}
 
-    label = label.strip()[:60] if isinstance(label, str) else ""
-
-    with get_connection() as connection:
-        message = save_message(
-            connection,
-            campaign_id,
-            user["id"],
-            "roll",
-            label or roll["expression"],
-            roll
-        )
-
-    socketio.emit("chat:mensagem", message, to=campaign_room(campaign_id))
     return {"ok": True}

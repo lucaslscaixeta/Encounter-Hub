@@ -6,67 +6,8 @@ import CampaignsPage from "./pages/CampaignsPage.jsx";
 import GameTablePage from "./pages/GameTablePage.jsx";
 import SessionsPage from "./pages/SessionsPage.jsx";
 import ProfilePage from "./pages/ProfilePage.jsx";
+import CharactersPage from "./pages/CharactersPage.jsx";
 import "./App.css";
-
-function CharactersPage() {
-  function handleDownload() {
-    const ficha = [
-      "ENCOUNTER HUB",
-      "FICHA DE PERSONAGEM",
-      "",
-      "Nome: ",
-      "Jogador: ",
-      "Classe: ",
-      "Raça: ",
-      "Nível: 1",
-      "Pontos de vida: ",
-      "Classe de armadura: ",
-      "Atributos: ",
-      "Habilidades: ",
-      "Equipamentos: ",
-      "História: ",
-    ].join("\n");
-
-    const arquivo = new Blob(
-      [ficha],
-      { type: "text/plain;charset=utf-8" }
-    );
-
-    const url = URL.createObjectURL(arquivo);
-    const link = document.createElement("a");
-
-    link.href = url;
-    link.download = "ficha-personagem.txt";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-
-    URL.revokeObjectURL(url);
-  }
-
-  return (
-    <section className="campaigns-panel">
-      <h1>Suas fichas</h1>
-
-      <div className="campaigns-empty">
-        <h2>Nenhuma ficha por enquanto</h2>
-
-        <p>
-          Baixe um modelo de ficha para começar a organizar
-          as informações do seu personagem.
-        </p>
-
-        <button
-          className="create-campaign-button"
-          type="button"
-          onClick={handleDownload}
-        >
-          Baixar ficha
-        </button>
-      </div>
-    </section>
-  );
-}
 
 function Dashboard({ user, onUserUpdate, onLogout, onAccountDeleted }) {
   const [activePage, setActivePage] = React.useState("campaigns");
@@ -177,7 +118,9 @@ function Dashboard({ user, onUserUpdate, onLogout, onAccountDeleted }) {
         />
       )}
 
-      {activePage === "characters" && <CharactersPage />}
+      {activePage === "characters" && (
+        <CharactersPage onGoToCampaigns={() => goToPage("campaigns")} />
+      )}
 
       {activePage === "profile" && (
         <ProfilePage

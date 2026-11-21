@@ -6,6 +6,7 @@ from extensoes import socketio
 from imagens import delete_image_file
 from mapas import delete_map_file
 from mesa_virtual import delete_token_image
+from personagens import delete_character_image
 from servico_email import enviar_email
 import limites
 
@@ -114,6 +115,20 @@ def delete_account():
             ).fetchall()
         ]
 
+        # Fichas do usuário e das campanhas dele saem em cascata no banco;
+        # os retratos no Storage são apagados depois.
+        character_files = [
+            row["image_filename"]
+            for row in connection.execute(
+                """
+                SELECT image_filename FROM characters
+                WHERE image_filename IS NOT NULL
+                  AND (campaign_id = ANY(%s) OR owner_id = %s)
+                """,
+                (owned_ids, g.user["id"])
+            ).fetchall()
+        ]
+
         # Mensagens e tokens do usuário nas campanhas de outras pessoas
         # também são dados dele; o restante sai em cascata com a conta.
         connection.execute(
@@ -134,6 +149,9 @@ def delete_account():
 
     for filename in token_files:
         delete_token_image(filename)
+
+    for filename in character_files:
+        delete_character_image(filename)
 
     delete_image_file("avatars", user["avatar_filename"])
 
